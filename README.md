@@ -2,6 +2,10 @@
 
 SignalLanes is a small macOS menu bar app and CLI for monitoring local AI coding agents and AI IDEs.
 
+![SignalLanes floating panel example](Assets/Screenshots/floating-panel-example.png)
+
+Example screenshot with anonymized project names.
+
 It shows a traffic-light status for the tools you are running locally:
 
 - Green means no tracked agent appears to be working.
