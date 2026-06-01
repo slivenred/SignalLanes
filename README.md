@@ -2,9 +2,13 @@
 
 SignalLanes is a small macOS menu bar app and CLI for monitoring local AI coding agents and AI IDEs.
 
-![SignalLanes floating panel example](Assets/Screenshots/floating-panel-example.png)
+## Preview
 
-Example screenshot with anonymized project names.
+These example screenshots use demo project names and do not show private local paths or real project data.
+
+| Working | Waiting for permission | Idle |
+| --- | --- | --- |
+| <img src="Assets/Screenshots/status-red-working.png" alt="SignalLanes red working example" width="260"> | <img src="Assets/Screenshots/status-yellow-waiting.png" alt="SignalLanes yellow waiting example" width="260"> | <img src="Assets/Screenshots/status-green-idle.png" alt="SignalLanes green idle example" width="260"> |
 
 It shows a traffic-light status for the tools you are running locally:
 
