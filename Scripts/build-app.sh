@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+VERSION="${SIGNALLANES_VERSION:-0.1.0}"
+BUILD_NUMBER="${SIGNALLANES_BUILD:-1}"
+BUNDLE_IDENTIFIER="${SIGNALLANES_BUNDLE_ID:-local.signal-lanes}"
+
 swift build -c release --product SignalLanes
 swift build -c release --product signallanesctl
 
@@ -32,7 +36,7 @@ if [[ -f "$ICON_SOURCE" ]]; then
   iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
-cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -40,7 +44,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key>
   <string>SignalLanes</string>
   <key>CFBundleIdentifier</key>
-  <string>local.signal-lanes</string>
+  <string>$BUNDLE_IDENTIFIER</string>
   <key>CFBundleName</key>
   <string>SignalLanes</string>
   <key>CFBundleIconFile</key>
@@ -48,9 +52,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>LSUIElement</key>

@@ -18,6 +18,22 @@ It shows a traffic-light status for the tools you are running locally:
 
 Yellow has the highest priority, then red, then green. If one tool is waiting for approval while another is running, SignalLanes shows yellow so the thing that needs your attention is visible first.
 
+## Install for regular users
+
+The easiest way for a non-developer to use SignalLanes is a macOS app download from GitHub Releases.
+
+1. Download `SignalLanes-<version>-macos.zip` from the latest release.
+2. Unzip the file.
+3. Drag `SignalLanes.app` into the Applications folder.
+4. Open `SignalLanes.app`.
+5. Look for the traffic-light icon in the macOS menu bar. SignalLanes does not show a Dock icon.
+
+The app does not require a server account, cloud sync, or browser extension. Open your AI coding tools as usual, and SignalLanes will update the menu bar light and floating panel from local signals.
+
+If macOS says the app cannot be verified, the downloaded build is probably not signed and notarized yet. For a trusted test build, you can Control-click `SignalLanes.app`, choose Open, and confirm. Public releases should be code-signed and notarized with an Apple Developer account before being shared broadly.
+
+Optional: if you want SignalLanes to switch to matching windows more precisely from the floating panel, choose Enable Precise Window Switching from the menu and grant Accessibility permission in System Settings.
+
 ## What it monitors
 
 SignalLanes uses conservative local signals. It does not require a server account, cloud service, or browser extension.
@@ -82,6 +98,21 @@ The script creates:
 - `.build/release/signallanesctl`
 
 The app bundle is a local development build. Release downloads may need code signing and notarization before macOS treats them like a normal distributed app.
+
+## Package release downloads
+
+Create zip files that can be attached to a GitHub Release:
+
+```sh
+./Scripts/package-release.sh 0.1.0
+```
+
+The script creates:
+
+- `dist/SignalLanes-0.1.0-macos.zip`
+- `dist/signallanesctl-0.1.0-macos.zip`
+
+`SignalLanes-0.1.0-macos.zip` is the file most users should download. `signallanesctl-0.1.0-macos.zip` is optional for users who want CLI-based manual status overrides.
 
 ## Menu bar app
 
