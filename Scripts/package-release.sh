@@ -16,7 +16,7 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 ditto -c -k --keepParent --norsrc --noextattr --noqtn --noacl "$ROOT_DIR/.build/SignalLanes.app" "$APP_ZIP"
-ditto -c -k --keepParent --norsrc --noextattr --noqtn --noacl "$ROOT_DIR/.build/release/signallanesctl" "$CLI_ZIP"
+ditto -c -k --norsrc --noextattr --noqtn --noacl "$ROOT_DIR/.build/release/signallanesctl" "$CLI_ZIP"
 
 echo "Created:"
 echo "  $APP_ZIP"
