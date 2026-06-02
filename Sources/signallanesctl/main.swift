@@ -4,21 +4,8 @@ import SignalLanesCore
 
 private let store = FileStatusOverrideStore()
 
-private func usage() -> Never {
-    print("""
-    Usage:
-      signallanesctl set <agent-id> <green|yellow|red> [--ttl seconds|--no-expire] [reason...]
-      signallanesctl clear <agent-id>
-      signallanesctl list
-      signallanesctl status [--all-known]
-      signallanesctl queue [--all-known]
-      signallanesctl agents
-
-    Examples:
-      signallanesctl set codex yellow "waiting for approval"
-      signallanesctl set claude red --ttl 120 "running tests"
-      signallanesctl clear codex
-    """)
+private func usage(_ localized: SignalLanesLocalization) -> Never {
+    print(localized.cliUsage)
     exit(2)
 }
 
@@ -27,21 +14,64 @@ private func fail(_ message: String) -> Never {
     exit(1)
 }
 
-private let arguments = Array(CommandLine.arguments.dropFirst())
+private func parseLanguageArguments(
+    _ arguments: [String],
+    defaultLanguage: AppLanguage
+) -> (language: AppLanguage, arguments: [String]) {
+    var language = defaultLanguage
+    var remainingArguments: [String] = []
+    var index = 0
+
+    while index < arguments.count {
+        let argument = arguments[index]
+        if argument == "--lang" {
+            guard index + 1 < arguments.count,
+                  let parsedLanguage = AppLanguage.parse(arguments[index + 1])
+            else {
+                fail(SignalLanesLocalization(language: language).missingLanguageValue)
+            }
+
+            language = parsedLanguage
+            index += 2
+        } else if argument.hasPrefix("--lang=") {
+            let value = String(argument.dropFirst("--lang=".count))
+            guard let parsedLanguage = AppLanguage.parse(value) else {
+                fail(SignalLanesLocalization(language: language).missingLanguageValue)
+            }
+
+            language = parsedLanguage
+            index += 1
+        } else {
+            remainingArguments.append(argument)
+            index += 1
+        }
+    }
+
+    return (language, remainingArguments)
+}
+
+private let environmentLanguage = AppLanguage.parse(ProcessInfo.processInfo.environment["SIGNALLANES_LANG"])
+    ?? .defaultLanguage
+private let parsedArguments = parseLanguageArguments(
+    Array(CommandLine.arguments.dropFirst()),
+    defaultLanguage: environmentLanguage
+)
+private let localized = SignalLanesLocalization(language: parsedArguments.language)
+private let arguments = parsedArguments.arguments
 guard let command = arguments.first else {
-    usage()
+    usage(localized)
 }
 
 do {
     switch command {
     case "set":
         guard arguments.count >= 3 else {
-            usage()
+            usage(localized)
         }
 
         let agentID = arguments[1]
         guard let state = LightState.parse(arguments[2]) else {
-            fail("unknown state '\(arguments[2])'")
+            fail(localized.unknownState(arguments[2]))
         }
 
         var index = 3
@@ -56,7 +86,7 @@ do {
                       let seconds = TimeInterval(arguments[index + 1]),
                       seconds > 0
                 else {
-                    fail("--ttl requires a positive number of seconds")
+                    fail(localized.ttlRequiresPositiveSeconds)
                 }
                 expiresAt = Date().addingTimeInterval(seconds)
                 index += 2
@@ -71,26 +101,26 @@ do {
 
         let reason = reasonParts.isEmpty ? nil : reasonParts.joined(separator: " ")
         try store.set(agentID: agentID, state: state, reason: reason, expiresAt: expiresAt)
-        print("Set \(agentID) to \(state.displayName).")
+        print(localized.setMessage(agentID: agentID, state: state))
 
     case "clear":
         guard arguments.count == 2 else {
-            usage()
+            usage(localized)
         }
 
         try store.clear(agentID: arguments[1])
-        print("Cleared \(arguments[1]).")
+        print(localized.clearedMessage(agentID: arguments[1]))
 
     case "list":
         let now = Date()
         let overrides = try store.activeOverrides(now: now).sorted { $0.agentID < $1.agentID }
         if overrides.isEmpty {
-            print("No active overrides.")
+            print(localized.noActiveOverrides)
         } else {
             for override in overrides {
-                let expiry = override.expiresAt.map { "expires \($0)" } ?? "no expiry"
+                let expiry = override.expiresAt.map(localized.expiresMessage) ?? localized.noExpiry
                 let reason = override.reason.map { " - \($0)" } ?? ""
-                print("\(override.agentID): \(override.state.displayName), \(expiry)\(reason)")
+                print("\(override.agentID): \(localized.stateDisplayName(override.state)), \(expiry)\(reason)")
             }
         }
 
@@ -102,10 +132,14 @@ do {
             includeKnownIdleReports: includeKnownIdleReports
         )
         let result = try detector.detect()
-        print("Overall: \(result.overallState.displayName)")
-        printQueueSection(title: "Waiting for Permission", tasks: result.tasks(in: .waitingForPermission))
-        printQueueSection(title: "Running", tasks: result.tasks(in: .working))
-        printQueueSection(title: "Stopped", tasks: result.tasks(in: .idle))
+        print("\(localized.overall): \(localized.stateDisplayName(result.overallState))")
+        printQueueSection(
+            title: localized.waitingForPermission,
+            tasks: result.tasks(in: .waitingForPermission),
+            localized: localized
+        )
+        printQueueSection(title: localized.running, tasks: result.tasks(in: .working), localized: localized)
+        printQueueSection(title: localized.stopped, tasks: result.tasks(in: .idle), localized: localized)
 
     case "agents":
         for definition in defaultAgentDefinitions {
@@ -113,31 +147,40 @@ do {
         }
 
     default:
-        usage()
+        usage(localized)
     }
 } catch {
     fail(String(describing: error))
 }
 
-private func printQueueSection(title: String, tasks: [TaskReport]) {
+private func printQueueSection(
+    title: String,
+    tasks: [TaskReport],
+    localized: SignalLanesLocalization
+) {
     print("\n\(title) (\(tasks.count))")
     if tasks.isEmpty {
-        print("  None")
+        print("  \(localized.none)")
         return
     }
 
     for task in tasks {
-        let project = task.projectPath.map { " - \($0)" } ?? " - project not exposed"
-        print("  \(task.displayName)\(project) [\(task.source.rawValue)]")
+        let project = task.projectPath.map { " - \($0)" } ?? " - \(localized.projectNotExposed)"
+        print("  \(task.displayName)\(project) [\(localized.sourceName(task.source))]")
         if let title = task.title {
-            print("    Title: \(title)")
+            print("    \(localized.titleLabel): \(title)")
         }
         if let sessionID = task.sessionID {
-            print("    Session: \(sessionID)")
+            print("    \(localized.session): \(sessionID)")
         }
-        print("    \(task.reason)")
+        print("    \(localized.localizedReason(task.reason))")
         for process in task.processes.prefix(3) {
-            print("    PID \(process.pid), CPU \(String(format: "%.1f", process.cpuPercent))%, \(process.state)")
+            let processSummary = localized.processSummary(
+                pid: process.pid,
+                cpuPercent: process.cpuPercent,
+                state: process.state
+            )
+            print("    \(processSummary)")
         }
     }
 }

@@ -49,12 +49,14 @@ final class FloatingSignalLanesWindowController: NSObject, NSWindowDelegate {
     private let defaults: UserDefaults
     private let indicatorView = FloatingSignalLanesView()
     private lazy var panel: NSPanel = makePanel()
+    private var language = AppLanguage.defaultLanguage
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         super.init()
         indicatorView.theme = theme
         indicatorView.displaySize = displaySize
+        indicatorView.language = language
     }
 
     var isEnabled: Bool {
@@ -127,11 +129,17 @@ final class FloatingSignalLanesWindowController: NSObject, NSWindowDelegate {
         self.displaySize = displaySize
     }
 
+    func setLanguage(_ language: AppLanguage) {
+        self.language = language
+        indicatorView.language = language
+        updateToolTip()
+    }
+
     func update(result: DetectionResult) {
         indicatorView.result = result
         indicatorView.fallbackState = result.overallState
         indicatorView.message = nil
-        indicatorView.toolTip = "SignalLanes: \(result.overallState.displayName). Click a status to filter, scroll the list, click a row to activate its IDE, or drag to move."
+        updateToolTip()
         resizePanel()
         showIfEnabled()
     }
@@ -140,7 +148,7 @@ final class FloatingSignalLanesWindowController: NSObject, NSWindowDelegate {
         indicatorView.result = nil
         indicatorView.fallbackState = state
         indicatorView.message = message
-        indicatorView.toolTip = "SignalLanes: \(state.displayName). Click a status to filter, scroll the list, click a row to activate its IDE, or drag to move."
+        updateToolTip()
         resizePanel()
         showIfEnabled()
     }
@@ -175,6 +183,11 @@ final class FloatingSignalLanesWindowController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.delegate = self
         return panel
+    }
+
+    private func updateToolTip() {
+        let state = indicatorView.result?.overallState ?? indicatorView.fallbackState
+        indicatorView.toolTip = SignalLanesLocalization(language: language).floatingToolTip(for: state)
     }
 
     private func defaultFrame() -> NSRect {
@@ -305,12 +318,22 @@ private final class FloatingSignalLanesView: NSView {
             window?.invalidateCursorRects(for: self)
         }
     }
+    var language: AppLanguage = .defaultLanguage {
+        didSet {
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
 
     private let dragThreshold: CGFloat = 4
     private var cachedDisplayGroups: [DisplayTaskGroup] = []
     private var mouseDownContext: MouseDownContext?
     private var selectedFilterState: LightState?
     private var scrollOffset = 0
+
+    private var localized: SignalLanesLocalization {
+        SignalLanesLocalization(language: language)
+    }
 
     var preferredSize: NSSize {
         NSSize(
@@ -857,7 +880,7 @@ private final class FloatingSignalLanesView: NSView {
     }
 
     private func fallbackName() -> String {
-        "Open session"
+        localized.openSession
     }
 
     private func filteredGroups() -> [DisplayTaskGroup] {
@@ -883,14 +906,7 @@ private final class FloatingSignalLanesView: NSView {
     }
 
     private func emptyMessage(for state: LightState) -> String {
-        switch state {
-        case .working:
-            return "No running IDE tasks detected."
-        case .waitingForPermission:
-            return "No permission requests detected."
-        case .idle:
-            return "No stopped IDE tasks detected."
-        }
+        localized.emptyMessage(for: state)
     }
 
     private func queueCounts(for groups: [DisplayTaskGroup]) -> (waiting: Int, running: Int, stopped: Int) {
@@ -904,10 +920,14 @@ private final class FloatingSignalLanesView: NSView {
     private func summaryText(for counts: (waiting: Int, running: Int, stopped: Int)) -> String {
         let total = counts.running + counts.waiting + counts.stopped
         guard total > 0 else {
-            return "No tracked sessions right now"
+            return localized.noTrackedSessions
         }
 
-        return "\(counts.running) running / \(counts.waiting) waiting / \(counts.stopped) stopped"
+        return localized.floatingSummary(
+            running: counts.running,
+            waiting: counts.waiting,
+            stopped: counts.stopped
+        )
     }
 
     private func statusSegments(
@@ -915,9 +935,9 @@ private final class FloatingSignalLanesView: NSView {
         counts: (waiting: Int, running: Int, stopped: Int)
     ) -> [(state: LightState, count: Int, label: String, rect: NSRect)] {
         let specs: [(state: LightState, count: Int, label: String)] = [
-            (.working, counts.running, "Running"),
-            (.waitingForPermission, counts.waiting, "Waiting"),
-            (.idle, counts.stopped, "Stopped")
+            (.working, counts.running, localized.segmentLabel(for: .working)),
+            (.waitingForPermission, counts.waiting, localized.segmentLabel(for: .waitingForPermission)),
+            (.idle, counts.stopped, localized.segmentLabel(for: .idle))
         ]
         let rects = statusSegmentRects(in: rect)
 
@@ -946,25 +966,11 @@ private final class FloatingSignalLanesView: NSView {
     }
 
     private func statusPillLabel(for state: LightState) -> String {
-        switch state {
-        case .working:
-            return "Working"
-        case .waitingForPermission:
-            return "Waiting"
-        case .idle:
-            return "Idle"
-        }
+        localized.statusPillLabel(for: state)
     }
 
     private func shortSegmentLabel(for state: LightState) -> String {
-        switch state {
-        case .working:
-            return "Run"
-        case .waitingForPermission:
-            return "Wait"
-        case .idle:
-            return "Stop"
-        }
+        localized.shortSegmentLabel(for: state)
     }
 
     private func drawMessageWell(in rect: NSRect, color: NSColor) {
@@ -1315,11 +1321,11 @@ private final class FloatingSignalLanesView: NSView {
     }
 
     private func stateBreakdownParts(for group: DisplayTaskGroup) -> [String] {
-        [
-            group.waitingCount > 0 ? "Y\(group.waitingCount)" : nil,
-            group.runningCount > 0 ? "R\(group.runningCount)" : nil,
-            group.stoppedCount > 0 ? "G\(group.stoppedCount)" : nil
-        ].compactMap { $0 }
+        localized.badgeParts(
+            waiting: group.waitingCount,
+            running: group.runningCount,
+            stopped: group.stoppedCount
+        )
     }
 
     private func lightColor(for state: LightState) -> NSColor {

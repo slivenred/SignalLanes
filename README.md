@@ -1,5 +1,7 @@
 # SignalLanes
 
+[English](README.md) | [繁體中文](README.zh-Hant.md) | [简体中文](README.zh-Hans.md)
+
 SignalLanes is a small macOS menu bar app and CLI for monitoring local AI coding agents and AI IDEs.
 
 ## Preview
@@ -165,6 +167,7 @@ The menu also includes:
 - Reset Floating Position
 - Theme
 - Display Size
+- Language
 - Enable Precise Window Switching
 - Open Status Folder
 - Quit SignalLanes
@@ -180,6 +183,7 @@ You can:
 - Scroll when there are more tasks than visible rows.
 - Click a task row to try to activate the matching IDE or app.
 - Change the theme and size from the menu bar menu.
+- Switch the app language from the Language menu. English is the default, with Traditional Chinese and Simplified Chinese available.
 - Reset its position from the menu bar menu.
 
 The floating window uses a floating window level, so it stays above normal app windows while remaining below system UI such as the menu bar and system panels.
@@ -194,6 +198,7 @@ Run it from source:
 swift run signallanesctl agents
 swift run signallanesctl queue
 swift run signallanesctl queue --all-known
+swift run signallanesctl --lang zh-Hant queue --all-known
 ```
 
 Or use the release binary after building:
@@ -202,6 +207,8 @@ Or use the release binary after building:
 .build/release/signallanesctl agents
 .build/release/signallanesctl queue
 ```
+
+English is the default CLI language. Use `--lang en`, `--lang zh-Hant`, or `--lang zh-Hans` to switch output language for a command. You can also set `SIGNALLANES_LANG`.
 
 ### List supported agent IDs
 

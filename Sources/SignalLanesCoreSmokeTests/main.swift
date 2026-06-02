@@ -33,6 +33,19 @@ private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
     }
 }
 
+private func testLocalizationDefaultsAndParsesSupportedLanguages() {
+    expect(AppLanguage.defaultLanguage == .english, "default app language should be English")
+    expect(AppLanguage.parse("zh-Hant") == .traditionalChinese, "zh-Hant should parse")
+    expect(AppLanguage.parse("zh_CN") == .simplifiedChinese, "zh_CN should parse as simplified Chinese")
+
+    let traditional = SignalLanesLocalization(language: .traditionalChinese)
+    let simplified = SignalLanesLocalization(language: .simplifiedChinese)
+    expect(traditional.stateDisplayName(.waitingForPermission).contains("黃燈"), "traditional Chinese should localize yellow status")
+    expect(simplified.queueSummary(waiting: 1, running: 2, stopped: 3).contains("运行中"), "simplified Chinese should localize queue summary")
+    expect(traditional.localizedReason("Codex Desktop session is active.").contains("工作階段"), "traditional Chinese should localize common detector reasons")
+    expect(simplified.localizedReason("Antigravity Claude log shows recent activity.").contains("近期活动"), "simplified Chinese should localize dynamic detector reasons")
+}
+
 private func testPSParserKeepsCommandWithSpaces() {
     let output = "123 1 0.0 S /Applications/Visual Studio Code.app/Contents/MacOS/Electron --type=renderer\n"
     let snapshots = PSProcessProvider.parsePSOutput(output)
@@ -1460,6 +1473,7 @@ private func testClaudeDesktopProviderSkipsArchivedSessions() throws {
 }
 
 do {
+    testLocalizationDefaultsAndParsesSupportedLanguages()
     testPSParserKeepsCommandWithSpaces()
     try testCodexCliPresenceIsWorking()
     try testCodexDesktopProcessDoesNotBecomeGenericCodexTask()

@@ -4,6 +4,10 @@ import SignalLanesCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private enum DefaultsKey {
+        static let language = "app.language"
+    }
+
     private enum RefreshOutcome: Sendable {
         case success(DetectionResult)
         case failure(String)
@@ -25,6 +29,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
+    private var language: AppLanguage {
+        get {
+            AppLanguage.parse(UserDefaults.standard.string(forKey: DefaultsKey.language))
+                ?? .defaultLanguage
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: DefaultsKey.language)
+        }
+    }
+
+    private var localized: SignalLanesLocalization {
+        SignalLanesLocalization(language: language)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
@@ -33,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "SignalLanes"
         }
 
+        floatingWindowController.setLanguage(language)
         floatingWindowController.showIfEnabled()
         refresh()
         refreshTimer = Timer.scheduledTimer(
@@ -115,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if previousResult?.overallState != result.overallState || button.image == nil {
             button.image = SignalLanesImage.make(active: result.overallState)
         }
-        button.toolTip = "SignalLanes: \(result.overallState.displayName)"
+        button.toolTip = "SignalLanes: \(localized.stateDisplayName(result.overallState))"
 
         let visibleResultChanged = previousResult.map {
             $0.overallState != result.overallState || $0.taskGroups != result.taskGroups
@@ -133,10 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.image = SignalLanesImage.make(active: .waitingForPermission)
         button.toolTip = "SignalLanes: \(errorMessage)"
-        floatingWindowController.update(state: .waitingForPermission, message: "Detection failed")
+        floatingWindowController.update(state: .waitingForPermission, message: localized.detectionFailed)
 
         let menu = NSMenu()
-        let item = NSMenuItem(title: "Detection failed: \(errorMessage)", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "\(localized.detectionFailed): \(errorMessage)", action: nil, keyEquivalent: "")
         item.isEnabled = false
         menu.addItem(item)
         menu.addItem(NSMenuItem.separator())
@@ -149,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let taskGroups = result.taskGroups
 
         let summary = NSMenuItem(
-            title: "SignalLanes: \(result.overallState.displayName)  |  \(queueSummary(for: taskGroups))",
+            title: "SignalLanes: \(localized.stateDisplayName(result.overallState))  |  \(queueSummary(for: taskGroups))",
             action: nil,
             keyEquivalent: ""
         )
@@ -157,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(summary)
 
         let scanTime = NSMenuItem(
-            title: "Last scan: \(Self.timeFormatter.string(from: result.scannedAt))",
+            title: "\(localized.lastScan): \(Self.timeFormatter.string(from: result.scannedAt))",
             action: nil,
             keyEquivalent: ""
         )
@@ -166,19 +185,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         addQueueSection(
-            title: "Waiting for Permission",
+            title: localized.waitingForPermission,
             groups: taskGroups.filter { $0.state == .waitingForPermission },
             to: menu
         )
         menu.addItem(NSMenuItem.separator())
         addQueueSection(
-            title: "Running",
+            title: localized.running,
             groups: taskGroups.filter { $0.state == .working },
             to: menu
         )
         menu.addItem(NSMenuItem.separator())
         addQueueSection(
-            title: "Stopped",
+            title: localized.stopped,
             groups: taskGroups.filter { $0.state == .idle },
             to: menu
         )
@@ -194,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(header)
 
         if groups.isEmpty {
-            let empty = NSMenuItem(title: "  None", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: "  \(localized.none)", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
             return
@@ -208,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func menuItem(for group: TaskGroupReport) -> NSMenuItem {
         let projectName = group.projectPath.map { URL(fileURLWithPath: $0).lastPathComponent }
             ?? group.tasks.first?.title
-            ?? "Open session"
+            ?? localized.openSession
         let titleSuffix = group.count == 1 && group.projectPath != nil
             ? group.tasks.first?.title.map { " - \($0)" } ?? ""
             : ""
@@ -221,14 +240,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let submenu = NSMenu()
         let reasonText = group.count == 1
-            ? group.tasks[0].reason
-            : "Grouped \(group.count) sessions by IDE and project."
+            ? localized.localizedReason(group.tasks[0].reason)
+            : localized.groupedSessions(count: group.count)
         let reason = NSMenuItem(title: reasonText, action: nil, keyEquivalent: "")
         reason.isEnabled = false
         submenu.addItem(reason)
 
         if let projectPath = group.projectPath {
-            let project = NSMenuItem(title: "Project: \(projectPath)", action: nil, keyEquivalent: "")
+            let project = NSMenuItem(title: "\(localized.project): \(projectPath)", action: nil, keyEquivalent: "")
             project.isEnabled = false
             submenu.addItem(project)
         }
@@ -236,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if group.count > 1 {
             submenu.addItem(NSMenuItem.separator())
             for task in group.tasks.prefix(8) {
-                let title = task.title ?? task.sessionID ?? "Open session"
+                let title = task.title ?? task.sessionID ?? localized.openSession
                 let session = NSMenuItem(
                     title: "\(stateSymbol(for: task.state)) \(title)",
                     action: nil,
@@ -246,16 +265,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 submenu.addItem(session)
             }
         } else if let sessionID = group.tasks.first?.sessionID {
-            let session = NSMenuItem(title: "Session: \(sessionID)", action: nil, keyEquivalent: "")
+            let session = NSMenuItem(title: "\(localized.session): \(sessionID)", action: nil, keyEquivalent: "")
             session.isEnabled = false
             submenu.addItem(session)
         }
 
         let firstSource = group.tasks[0].source
         let sourceValue = group.tasks.allSatisfy { $0.source == firstSource }
-            ? firstSource.rawValue
-            : "mixed"
-        let source = NSMenuItem(title: "Source: \(sourceValue)", action: nil, keyEquivalent: "")
+            ? localized.sourceName(firstSource)
+            : localized.mixed
+        let source = NSMenuItem(title: "\(localized.source): \(sourceValue)", action: nil, keyEquivalent: "")
         source.isEnabled = false
         submenu.addItem(source)
 
@@ -263,7 +282,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             submenu.addItem(NSMenuItem.separator())
             for process in group.processes.prefix(5) {
                 let processItem = NSMenuItem(
-                    title: "PID \(process.pid), CPU \(String(format: "%.1f", process.cpuPercent))%, \(process.state)",
+                    title: localized.processSummary(
+                        pid: process.pid,
+                        cpuPercent: process.cpuPercent,
+                        state: process.state
+                    ),
                     action: nil,
                     keyEquivalent: ""
                 )
@@ -279,27 +302,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func addCommonMenuItems(to menu: NSMenu) {
         menu.addItem(NSMenuItem(
-            title: "Refresh Now",
+            title: localized.refreshNow,
             action: #selector(refreshFromMenu),
             keyEquivalent: "r"
         ))
         menu.addItem(NSMenuItem(
-            title: floatingWindowController.isEnabled ? "Hide Floating Light" : "Show Floating Light",
+            title: floatingWindowController.isEnabled ? localized.hideFloatingLight : localized.showFloatingLight,
             action: #selector(toggleFloatingLight),
             keyEquivalent: "f"
         ))
         menu.addItem(NSMenuItem(
-            title: "Reset Floating Position",
+            title: localized.resetFloatingPosition,
             action: #selector(resetFloatingPosition),
             keyEquivalent: ""
         ))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(themeMenuItem())
         menu.addItem(displaySizeMenuItem())
+        menu.addItem(languageMenuItem())
         menu.addItem(NSMenuItem.separator())
         let accessibilityTitle = AXIsProcessTrusted()
-            ? "Precise Window Switching Enabled"
-            : "Enable Precise Window Switching..."
+            ? localized.preciseWindowSwitchingEnabled
+            : localized.enablePreciseWindowSwitching
         let accessibilityItem = NSMenuItem(
             title: accessibilityTitle,
             action: AXIsProcessTrusted() ? nil : #selector(requestAccessibilityPermission),
@@ -308,13 +332,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityItem.isEnabled = !AXIsProcessTrusted()
         menu.addItem(accessibilityItem)
         menu.addItem(NSMenuItem(
-            title: "Open Status Folder",
+            title: localized.openStatusFolder,
             action: #selector(openStatusFolder),
             keyEquivalent: ""
         ))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(
-            title: "Quit SignalLanes",
+            title: localized.quitSignalLanes,
             action: #selector(quit),
             keyEquivalent: "q"
         ))
@@ -322,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func themeMenuItem() -> NSMenuItem {
         let selectedTheme = floatingWindowController.theme
-        let item = NSMenuItem(title: "Theme: \(selectedTheme.displayName)", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "\(localized.theme): \(selectedTheme.displayName)", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
 
         for theme in FloatingSignalLanesTheme.allCases {
@@ -343,12 +367,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func displaySizeMenuItem() -> NSMenuItem {
         let selectedSize = floatingWindowController.displaySize
-        let item = NSMenuItem(title: "Display Size: \(selectedSize.displayName)", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "\(localized.displaySize): \(displaySizeName(selectedSize))", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
 
         for displaySize in FloatingSignalLanesDisplaySize.allCases {
             let sizeItem = NSMenuItem(
-                title: displaySize.displayName,
+                title: displaySizeName(displaySize),
                 action: #selector(selectFloatingDisplaySize(_:)),
                 keyEquivalent: ""
             )
@@ -360,6 +384,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.submenu = submenu
         return item
+    }
+
+    private func languageMenuItem() -> NSMenuItem {
+        let selectedLanguage = language
+        let item = NSMenuItem(title: "\(localized.languageMenu): \(selectedLanguage.displayName)", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+
+        for language in AppLanguage.allCases {
+            let languageItem = NSMenuItem(
+                title: language.displayName,
+                action: #selector(selectLanguage(_:)),
+                keyEquivalent: ""
+            )
+            languageItem.target = self
+            languageItem.representedObject = language.rawValue
+            languageItem.state = language == selectedLanguage ? .on : .off
+            submenu.addItem(languageItem)
+        }
+
+        item.submenu = submenu
+        return item
+    }
+
+    private func displaySizeName(_ displaySize: FloatingSignalLanesDisplaySize) -> String {
+        switch (language, displaySize) {
+        case (.english, .small):
+            return "Small"
+        case (.english, .medium):
+            return "Medium"
+        case (.english, .large):
+            return "Large"
+        case (.traditionalChinese, .small):
+            return "小"
+        case (.traditionalChinese, .medium):
+            return "中"
+        case (.traditionalChinese, .large):
+            return "大"
+        case (.simplifiedChinese, .small):
+            return "小"
+        case (.simplifiedChinese, .medium):
+            return "中"
+        case (.simplifiedChinese, .large):
+            return "大"
+        }
     }
 
     @objc private func openStatusFolder() {
@@ -408,6 +476,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let selectedLanguage = AppLanguage.parse(rawValue)
+        else {
+            return
+        }
+
+        language = selectedLanguage
+        floatingWindowController.setLanguage(selectedLanguage)
+        if let lastResult {
+            updateStatusItem(result: lastResult)
+        } else {
+            refreshSynchronously()
+        }
+    }
+
     @objc private func resetFloatingPosition() {
         floatingWindowController.resetPosition()
         floatingWindowController.setEnabled(true)
@@ -433,15 +517,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let waiting = groups.filter { $0.state == .waitingForPermission }.count
         let running = groups.filter { $0.state == .working }.count
         let stopped = groups.filter { $0.state == .idle }.count
-        return "\(waiting) waiting, \(running) running, \(stopped) stopped"
+        return localized.queueSummary(waiting: waiting, running: running, stopped: stopped)
     }
 
     private func groupBadge(for group: TaskGroupReport) -> String? {
-        let parts = [
-            group.waitingCount > 0 ? "Y\(group.waitingCount)" : nil,
-            group.runningCount > 0 ? "R\(group.runningCount)" : nil,
-            group.stoppedCount > 0 ? "G\(group.stoppedCount)" : nil
-        ].compactMap { $0 }
+        let parts = localized.badgeParts(
+            waiting: group.waitingCount,
+            running: group.runningCount,
+            stopped: group.stoppedCount
+        )
 
         if parts.count > 1 {
             return parts.joined(separator: " ")
@@ -451,14 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stateSymbol(for state: LightState) -> String {
-        switch state {
-        case .idle:
-            return "Green"
-        case .working:
-            return "Red"
-        case .waitingForPermission:
-            return "Yellow"
-        }
+        localized.stateColorName(state)
     }
 
     private static let timeFormatter: DateFormatter = {
