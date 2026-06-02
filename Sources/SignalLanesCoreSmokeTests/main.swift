@@ -1095,6 +1095,98 @@ private func testAntigravityLogSessionlessActivityInfersProjectFromFilePath() th
     )
 }
 
+private func testAntigravityLogAuditActivityInfersProjectRoot() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let projectURL = rootURL.appendingPathComponent("techmoon-codex", isDirectory: true)
+    let auditURL = projectURL
+        .appendingPathComponent("audits", isDirectory: true)
+        .appendingPathComponent("seo-audit-2026-06-01", isDirectory: true)
+    let logURL = rootURL
+        .appendingPathComponent("logs/20260530T120000/window1/exthost/Anthropic.claude-code", isDirectory: true)
+        .appendingPathComponent("Claude VSCode.log")
+    try fileManager.createDirectory(at: auditURL, withIntermediateDirectories: true)
+    try fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 2_255)
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
+    func line(offset: TimeInterval, _ text: String) -> String {
+        "\(formatter.string(from: baseDate.addingTimeInterval(offset))) [info] \(text)"
+    }
+
+    let filePath = auditURL
+        .appendingPathComponent("fix-tag-cleanup.mjs.tmp")
+        .path
+    let log = [
+        line(offset: 0, "From claude: 2026-05-30T10:00:00.000Z [DEBUG] Writing to temp file: \(filePath)"),
+        line(offset: 1, #"From claude: 2026-05-30T10:00:01.000Z [DEBUG] Stream started - received first chunk"#)
+    ].joined(separator: "\n")
+    try log.write(to: logURL, atomically: true, encoding: .utf8)
+
+    let provider = AntigravityLogStatusProvider(rootURLs: [rootURL], maxStatusAge: 600)
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "audit activity should create one hint")
+    expect(
+        hints.first?.projectPath == projectURL.standardizedFileURL.path,
+        "Antigravity should display the project root for audit subdirectory activity"
+    )
+}
+
+private func testAntigravityLogLaunchRootReplacesNestedActivityPath() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let projectURL = rootURL.appendingPathComponent("techmoon-codex", isDirectory: true)
+    let nestedURL = projectURL.appendingPathComponent("scratch-run", isDirectory: true)
+    let logURL = rootURL
+        .appendingPathComponent("logs/20260530T120000/window1/exthost/Anthropic.claude-code", isDirectory: true)
+        .appendingPathComponent("Claude VSCode.log")
+    try fileManager.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+    try fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 2_257)
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
+    func line(offset: TimeInterval, _ text: String) -> String {
+        "\(formatter.string(from: baseDate.addingTimeInterval(offset))) [info] \(text)"
+    }
+
+    let filePath = nestedURL
+        .appendingPathComponent("result.txt.tmp")
+        .path
+    let log = [
+        line(offset: 0, #"Received message from webview: {"type":"request","requestId":"1","request":{"type":"update_session_state","sessionId":"session-a","state":"running","title":"Nested work"}}"#),
+        line(offset: 1, "From claude: 2026-05-30T10:00:01.000Z [DEBUG] Writing to temp file: \(filePath)"),
+        line(offset: 2, #"Received message from webview: {"type":"launch_claude","cwd":"\#(projectURL.path)","permissionMode":"default","thinkingLevel":"default_on"}"#),
+        line(offset: 3, #"Received message from webview: {"type":"request","requestId":"2","request":{"type":"update_session_state","sessionId":"session-a","state":"running","title":"Nested work"}}"#)
+    ].joined(separator: "\n")
+    try log.write(to: logURL, atomically: true, encoding: .utf8)
+
+    let provider = AntigravityLogStatusProvider(rootURLs: [rootURL], maxStatusAge: 600)
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "nested activity should still produce one concrete session hint")
+    expect(
+        hints.first?.projectPath == projectURL.standardizedFileURL.path,
+        "Antigravity should prefer a later launch root over an earlier nested activity path"
+    )
+}
+
 private func testAntigravityLogIgnoresHomeConfigActivityPaths() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
@@ -1399,6 +1491,8 @@ do {
     try testAntigravityLogActivityAfterIdleMarksRunning()
     try testAntigravityLogSessionlessClaudeActivityMarksRunning()
     try testAntigravityLogSessionlessActivityInfersProjectFromFilePath()
+    try testAntigravityLogAuditActivityInfersProjectRoot()
+    try testAntigravityLogLaunchRootReplacesNestedActivityPath()
     try testAntigravityLogIgnoresHomeConfigActivityPaths()
     try testAntigravityLogMergesSingleProjectFallbackIntoConcreteSession()
     try testAntigravityLogTailCanStartInsideUTF8Character()

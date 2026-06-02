@@ -338,13 +338,12 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
                     }
 
                     let state: LightState = pendingPermission == nil ? .working : .waitingForPermission
+                    let projectPath = lastLaunch?.cwd ?? projectPathFromActivityLine(line)
                     statuses[sessionID] = merge(
                         existing: existing,
                         sessionID: sessionID,
                         title: pendingPermission?.title ?? existing?.title,
-                        projectPath: existing?.projectPath
-                            ?? lastLaunch?.cwd
-                            ?? projectPathFromActivityLine(line),
+                        projectPath: projectPath,
                         state: state,
                         fallbackState: state == .waitingForPermission ? .working : fallbackState(from: existing),
                         reason: pendingPermission?.reason ?? "\(sourceName) Claude log shows recent activity.",
@@ -399,8 +398,6 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
                     matching: sessionID,
                     at: timestamp
                 )
-                let projectPath = existing?.projectPath
-                    ?? launchedProjectPath
                 let title = request["title"] as? String ?? existing?.title
 
                 if let rename = lastRename, timestamp.timeIntervalSince(rename.updatedAt) <= 2 {
@@ -429,7 +426,7 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
                     existing: existing,
                     sessionID: sessionID,
                     title: pendingPermission?.title ?? title,
-                    projectPath: projectPath,
+                    projectPath: launchedProjectPath,
                     state: visibleState,
                     fallbackState: fallbackState,
                     reason: pendingPermission?.reason ?? reason(for: state, title: title),
@@ -717,6 +714,7 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
             "lib",
             "packages",
             "pages",
+            "audits",
             "ios",
             "macos",
             "android",
@@ -956,7 +954,7 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
         SessionStatus(
             sessionID: sessionID,
             title: title ?? existing?.title,
-            projectPath: projectPath ?? existing?.projectPath,
+            projectPath: preferredProjectPath(existing: existing?.projectPath, candidate: projectPath),
             state: state,
             fallbackState: fallbackState ?? existing?.fallbackState,
             reason: reason,
@@ -964,6 +962,30 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
             pendingPermissionAt: pendingPermissionAt,
             activeObservedAt: activeObservedAt ?? existing?.activeObservedAt
         )
+    }
+
+    private func preferredProjectPath(existing: String?, candidate: String?) -> String? {
+        guard let candidate else {
+            return existing
+        }
+
+        guard let existing else {
+            return candidate
+        }
+
+        if isAncestorPath(candidate, of: existing) {
+            return candidate
+        }
+
+        if isAncestorPath(existing, of: candidate) {
+            return existing
+        }
+
+        return existing
+    }
+
+    private func isAncestorPath(_ ancestor: String, of path: String) -> Bool {
+        ancestor == path || path.hasPrefix(ancestor + "/")
     }
 
     private func normalizeLogPath(_ rawValue: String?) -> String? {
