@@ -20,15 +20,18 @@ Yellow has the highest priority, then red, then green. If one tool is waiting fo
 
 ## Install for regular users
 
-The easiest way for a non-developer to use SignalLanes is a macOS app download from GitHub Releases.
+The easiest way for a non-developer to use SignalLanes is a macOS installer download from GitHub Releases.
 
-1. Download `SignalLanes-<version>-macos.zip` from the latest release.
-2. Unzip the file.
-3. Drag `SignalLanes.app` into the Applications folder.
-4. Open `SignalLanes.app`.
-5. Look for the traffic-light icon in the macOS menu bar. SignalLanes does not show a Dock icon.
+1. Download `SignalLanes-<version>-macos-installer.pkg` from the latest release.
+2. Open the installer package and follow the prompts.
+3. Open `SignalLanes.app` from Applications.
+4. Look for the traffic-light icon in the macOS menu bar. SignalLanes does not show a Dock icon.
 
 The app does not require a server account, cloud sync, or browser extension. Open your AI coding tools as usual, and SignalLanes will update the menu bar light and floating panel from local signals.
+
+The installer also installs `signallanesctl` to `/usr/local/bin/signallanesctl` for users who want CLI-based manual status overrides.
+
+Alternative: download `SignalLanes-<version>-macos.zip`, unzip it, and drag `SignalLanes.app` into the Applications folder yourself.
 
 If macOS says the app cannot be verified, the downloaded build is probably not signed and notarized yet. For a trusted test build, you can Control-click `SignalLanes.app`, choose Open, and confirm. Public releases should be code-signed and notarized with an Apple Developer account before being shared broadly.
 
@@ -99,9 +102,36 @@ The script creates:
 
 The app bundle is a local development build. Release downloads may need code signing and notarization before macOS treats them like a normal distributed app.
 
+## Build the installer package
+
+Build an unsigned macOS installer package:
+
+```sh
+./Scripts/build-installer.sh 0.1.0
+```
+
+The installer package is written to:
+
+```text
+dist/SignalLanes-0.1.0-macos-installer.pkg
+```
+
+It installs:
+
+- `SignalLanes.app` to `/Applications/SignalLanes.app`
+- `signallanesctl` to `/usr/local/bin/signallanesctl`
+
+For a signed package, set `SIGNALLANES_PKG_SIGN_ID` to a Developer ID Installer certificate name:
+
+```sh
+SIGNALLANES_PKG_SIGN_ID="Developer ID Installer: Example Name (TEAMID)" ./Scripts/build-installer.sh 0.1.0
+```
+
+Signed public releases should also be notarized before distribution.
+
 ## Package release downloads
 
-Create zip files that can be attached to a GitHub Release:
+Create installer and zip files that can be attached to a GitHub Release:
 
 ```sh
 ./Scripts/package-release.sh 0.1.0
@@ -109,10 +139,11 @@ Create zip files that can be attached to a GitHub Release:
 
 The script creates:
 
+- `dist/SignalLanes-0.1.0-macos-installer.pkg`
 - `dist/SignalLanes-0.1.0-macos.zip`
 - `dist/signallanesctl-0.1.0-macos.zip`
 
-`SignalLanes-0.1.0-macos.zip` is the file most users should download. `signallanesctl-0.1.0-macos.zip` is optional for users who want CLI-based manual status overrides.
+`SignalLanes-0.1.0-macos-installer.pkg` is the file most users should download. `SignalLanes-0.1.0-macos.zip` is available for manual drag-and-drop installation. `signallanesctl-0.1.0-macos.zip` is optional for users who only want the CLI.
 
 ## Menu bar app
 
