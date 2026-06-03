@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Assets/Brand/signallanes-logo.png" alt="SignalLanes logo" width="120">
+</p>
+
 # SignalLanes
 
 [English](README.md) | [繁體中文](README.zh-Hant.md) | [简体中文](README.zh-Hans.md)
