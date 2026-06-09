@@ -167,7 +167,7 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
             title: nil,
             projectPath: parsedSession.projectPath,
             state: state,
-            reason: "Codex Desktop session is \(state == .working ? "active" : "idle").",
+            reason: reason(for: state),
             updatedAt: parsedSession.modifiedAt
         )
     }
@@ -224,6 +224,8 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
     }
 
     private func stateFromTail(_ fileURL: URL) -> LightState? {
+        var completedCallIDs: Set<String> = []
+
         for line in readTailLines(fileURL).reversed() {
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data),
@@ -232,8 +234,16 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
                 continue
             }
 
+            if let callID = completedCallID(in: dictionary) {
+                completedCallIDs.insert(callID)
+            }
+
             if isTerminalEvent(dictionary) {
                 return .idle
+            }
+
+            if isWaitingForPermissionEvent(dictionary, completedCallIDs: completedCallIDs) {
+                return .waitingForPermission
             }
 
             if isWorkingEvent(dictionary) {
@@ -242,6 +252,17 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
         }
 
         return nil
+    }
+
+    private func reason(for state: LightState) -> String {
+        switch state {
+        case .waitingForPermission:
+            return "Codex Desktop session is waiting for permission."
+        case .working:
+            return "Codex Desktop session is active."
+        case .idle:
+            return "Codex Desktop session is idle."
+        }
     }
 
     private func isTerminalEvent(_ dictionary: [String: Any]) -> Bool {
@@ -291,6 +312,82 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
                 || type == "agent_message"
         default:
             return false
+        }
+    }
+
+    private func isWaitingForPermissionEvent(
+        _ dictionary: [String: Any],
+        completedCallIDs: Set<String>
+    ) -> Bool {
+        guard dictionary["type"] as? String == "response_item",
+              let payload = dictionary["payload"] as? [String: Any],
+              let payloadType = payload["type"] as? String,
+              payloadType == "function_call" || payloadType == "custom_tool_call",
+              let callID = stringValue(for: "call_id", in: payload),
+              !completedCallIDs.contains(callID)
+        else {
+            return false
+        }
+
+        return isApprovalProneToolCall(payload)
+    }
+
+    private func isApprovalProneToolCall(_ payload: [String: Any]) -> Bool {
+        let namespace = stringValue(for: "namespace", in: payload)?.lowercased() ?? ""
+        let name = stringValue(for: "name", in: payload)?.lowercased() ?? ""
+        let arguments = (
+            stringValue(for: "arguments", in: payload)
+                ?? stringValue(for: "input", in: payload)
+                ?? ""
+        ).lowercased()
+
+        if arguments.contains("\"sandbox_permissions\"")
+            && arguments.contains("require_escalated") {
+            return true
+        }
+
+        if namespace.contains("browser") || name.contains("browser") {
+            return true
+        }
+
+        guard namespace == "mcp__node_repl" || name == "js" else {
+            return false
+        }
+
+        return arguments.contains("browser.")
+            || arguments.contains("browser.tabs")
+            || arguments.contains("tab.goto")
+            || arguments.contains("page.goto")
+            || arguments.contains("http://127.0.0.1")
+            || arguments.contains("http://localhost")
+            || arguments.contains("http://[::1]")
+            || arguments.contains("file://")
+    }
+
+    private func completedCallID(in dictionary: [String: Any]) -> String? {
+        switch dictionary["type"] as? String {
+        case "response_item":
+            guard let payload = dictionary["payload"] as? [String: Any],
+                  let type = payload["type"] as? String,
+                  type == "function_call_output" || type == "custom_tool_call_output"
+            else {
+                return nil
+            }
+
+            return stringValue(for: "call_id", in: payload)
+
+        case "event_msg":
+            guard let payload = dictionary["payload"] as? [String: Any],
+                  let type = payload["type"] as? String,
+                  type == "mcp_tool_call_end" || type == "patch_apply_end"
+            else {
+                return nil
+            }
+
+            return stringValue(for: "call_id", in: payload)
+
+        default:
+            return nil
         }
     }
 

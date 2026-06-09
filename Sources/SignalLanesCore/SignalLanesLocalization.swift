@@ -775,6 +775,10 @@ public struct SignalLanesLocalization: Sendable {
             return "Codex Desktop 工作階段目前閒置。"
         case (.simplifiedChinese, "Codex Desktop session is idle."):
             return "Codex Desktop 会话目前空闲。"
+        case (.traditionalChinese, "Codex Desktop session is waiting for permission."):
+            return "Codex Desktop 工作階段正在等待授權。"
+        case (.simplifiedChinese, "Codex Desktop session is waiting for permission."):
+            return "Codex Desktop 会话正在等待授权。"
         case (.traditionalChinese, "Claude is requesting permission."):
             return "Claude 正在請求授權。"
         case (.simplifiedChinese, "Claude is requesting permission."):

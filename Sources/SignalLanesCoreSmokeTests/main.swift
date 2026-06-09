@@ -822,6 +822,114 @@ private func testCodexSessionProviderMarksAbortedTurnIdleImmediately() throws {
     expect(hints.first?.state == .idle, "aborted Codex turns should become idle immediately")
 }
 
+private func testCodexSessionProviderMarksPendingBrowserApprovalWaiting() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let sessionURL = rootURL
+        .appendingPathComponent("2026/05/30", isDirectory: true)
+        .appendingPathComponent("rollout-pending-browser-approval.jsonl")
+    try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 6_750)
+    let jsonl = #"""
+    {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"pending-browser-codex-session","cwd":"/tmp/browser-project","timestamp":"2026-05-30T10:00:00.000Z"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"js","namespace":"mcp__node_repl","call_id":"call-browser-approval","arguments":"{\"title\":\"Verify styled preview\",\"code\":\"await tab.goto('http://127.0.0.1:4178/tmp/preview.html');\"}"}}
+    {"timestamp":"2026-05-30T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{}}}
+    """#
+    try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes(
+        [.modificationDate: baseDate.addingTimeInterval(5)],
+        ofItemAtPath: sessionURL.path
+    )
+
+    let provider = CodexSessionStatusProvider(
+        rootURL: rootURL,
+        maxSessionAge: 600,
+        maxActiveAge: 120
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "Codex provider should keep pending browser approval sessions visible")
+    expect(hints.first?.state == .waitingForPermission, "pending browser approval should be waiting")
+    expect(hints.first?.reason == "Codex Desktop session is waiting for permission.", "pending browser approval should explain the waiting state")
+}
+
+private func testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let sessionURL = rootURL
+        .appendingPathComponent("2026/05/30", isDirectory: true)
+        .appendingPathComponent("rollout-completed-browser-call.jsonl")
+    try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 6_760)
+    let jsonl = #"""
+    {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"completed-browser-codex-session","cwd":"/tmp/browser-project","timestamp":"2026-05-30T10:00:00.000Z"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"js","namespace":"mcp__node_repl","call_id":"call-browser-complete","arguments":"{\"title\":\"Verify styled preview\",\"code\":\"await tab.goto('http://127.0.0.1:4178/tmp/preview.html');\"}"}}
+    {"timestamp":"2026-05-30T10:00:02.000Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","call_id":"call-browser-complete"}}
+    """#
+    try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes(
+        [.modificationDate: baseDate.addingTimeInterval(5)],
+        ofItemAtPath: sessionURL.path
+    )
+
+    let provider = CodexSessionStatusProvider(
+        rootURL: rootURL,
+        maxSessionAge: 600,
+        maxActiveAge: 120
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "Codex provider should keep completed browser calls visible")
+    expect(hints.first?.state == .working, "completed browser call should fall back to working, not waiting")
+}
+
+private func testCodexSessionProviderMarksPendingEscalatedCommandWaiting() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let sessionURL = rootURL
+        .appendingPathComponent("2026/05/30", isDirectory: true)
+        .appendingPathComponent("rollout-pending-escalated-command.jsonl")
+    try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 6_770)
+    let jsonl = #"""
+    {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"pending-escalated-command-codex-session","cwd":"/tmp/command-project","timestamp":"2026-05-30T10:00:00.000Z"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-escalated-command","arguments":"{\"cmd\":\"python3 -m http.server 4178 --bind 127.0.0.1\",\"sandbox_permissions\":\"require_escalated\",\"justification\":\"Allow a temporary local preview server.\"}"}}
+    """#
+    try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes(
+        [.modificationDate: baseDate.addingTimeInterval(5)],
+        ofItemAtPath: sessionURL.path
+    )
+
+    let provider = CodexSessionStatusProvider(
+        rootURL: rootURL,
+        maxSessionAge: 600,
+        maxActiveAge: 120
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "Codex provider should keep pending escalated command sessions visible")
+    expect(hints.first?.state == .waitingForPermission, "pending escalated command should be waiting")
+}
+
 private func testCodexSessionProviderTailCanStartInsideUTF8Character() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
@@ -1498,6 +1606,9 @@ do {
     try testCodexSessionProviderDoesNotMarkMetadataOnlySessionWorking()
     try testCodexSessionProviderMarksCompletedTurnIdleImmediately()
     try testCodexSessionProviderMarksAbortedTurnIdleImmediately()
+    try testCodexSessionProviderMarksPendingBrowserApprovalWaiting()
+    try testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting()
+    try testCodexSessionProviderMarksPendingEscalatedCommandWaiting()
     try testCodexSessionProviderTailCanStartInsideUTF8Character()
     try testCodexSessionProviderSkipsOldSessions()
     try testAntigravityLogKeepsRecentPermissionOverRunningUpdate()
