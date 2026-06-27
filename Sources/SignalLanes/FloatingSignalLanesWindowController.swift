@@ -1552,19 +1552,22 @@ private final class FloatingSignalLanesView: NSView {
             }
 
             application.unhide()
+            _ = activate(application)
             AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
             restoreWindowIfMinimized(window)
-            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-            AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-            AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-            return activate(application)
+            let raiseResult = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            let mainResult = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            let focusedResult = AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            if focusedResult == .success || mainResult == .success || raiseResult == .success {
+                return true
+            }
         }
 
         return false
     }
 
     private func activate(_ application: NSRunningApplication) -> Bool {
-        application.activate(options: [.activateAllWindows])
+        application.activate()
     }
 
     private func accessibilityTitle(for element: AXUIElement) -> String? {
