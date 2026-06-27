@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 VERSION="${SIGNALLANES_VERSION:-0.1.0}"
 BUILD_NUMBER="${SIGNALLANES_BUILD:-1}"
 BUNDLE_IDENTIFIER="${SIGNALLANES_BUNDLE_ID:-local.signal-lanes}"
+CODE_SIGN_IDENTITY="${SIGNALLANES_CODE_SIGN_IDENTITY:--}"
 
 swift build -c release --product SignalLanes
 swift build -c release --product signallanesctl
@@ -64,6 +65,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+codesign --force --deep --sign "$CODE_SIGN_IDENTITY" "$APP_DIR"
 
 echo "Built $APP_DIR"
 echo "Run: open '$APP_DIR'"

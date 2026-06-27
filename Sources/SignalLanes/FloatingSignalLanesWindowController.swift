@@ -336,6 +336,7 @@ private final class FloatingSignalLanesView: NSView {
     private var mouseDownContext: MouseDownContext?
     private var selectedFilterState: LightState?
     private var scrollOffset = 0
+    private var didShowAccessibilityWindowActivationPermissionPrompt = false
 
     private var localized: SignalLanesLocalization {
         SignalLanesLocalization(language: language)
@@ -1468,8 +1469,7 @@ private final class FloatingSignalLanesView: NSView {
         }
 
         guard canUseAccessibilityWindowActivation() else {
-            requestAccessibilityWindowActivationPermission()
-            return .permissionRequested
+            return requestAccessibilityWindowActivationPermission() ? .permissionRequested : .unavailable
         }
 
         for application in applications {
@@ -1485,10 +1485,16 @@ private final class FloatingSignalLanesView: NSView {
         AXIsProcessTrusted()
     }
 
-    private func requestAccessibilityWindowActivationPermission() {
+    private func requestAccessibilityWindowActivationPermission() -> Bool {
         guard !AXIsProcessTrusted() else {
-            return
+            didShowAccessibilityWindowActivationPermissionPrompt = false
+            return false
         }
+
+        guard !didShowAccessibilityWindowActivationPermissionPrompt else {
+            return false
+        }
+        didShowAccessibilityWindowActivationPermissionPrompt = true
 
         NSApp.activate(ignoringOtherApps: true)
 
@@ -1500,11 +1506,12 @@ private final class FloatingSignalLanesView: NSView {
         alert.addButton(withTitle: localized.notNow)
 
         guard alert.runModal() == .alertFirstButtonReturn else {
-            return
+            return true
         }
 
         requestAccessibilityPermissionPrompt()
         openAccessibilitySettings()
+        return true
     }
 
     private func requestAccessibilityPermissionPrompt() {
