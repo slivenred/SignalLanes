@@ -333,7 +333,6 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
     }
 
     private func isApprovalProneToolCall(_ payload: [String: Any]) -> Bool {
-        let namespace = stringValue(for: "namespace", in: payload)?.lowercased() ?? ""
         let name = stringValue(for: "name", in: payload)?.lowercased() ?? ""
         let arguments = (
             stringValue(for: "arguments", in: payload)
@@ -346,26 +345,11 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
             return true
         }
 
-        if namespace.contains("browser") || name.contains("browser") {
-            return true
-        }
-
         if name == "apply_patch" {
             return true
         }
 
-        guard namespace == "mcp__node_repl" || name == "js" else {
-            return false
-        }
-
-        return arguments.contains("browser.")
-            || arguments.contains("browser.tabs")
-            || arguments.contains("tab.goto")
-            || arguments.contains("page.goto")
-            || arguments.contains("http://127.0.0.1")
-            || arguments.contains("http://localhost")
-            || arguments.contains("http://[::1]")
-            || arguments.contains("file://")
+        return false
     }
 
     private func completedCallID(in dictionary: [String: Any]) -> String? {

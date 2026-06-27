@@ -7,7 +7,50 @@ cd "$ROOT_DIR"
 VERSION="${SIGNALLANES_VERSION:-0.1.0}"
 BUILD_NUMBER="${SIGNALLANES_BUILD:-1}"
 BUNDLE_IDENTIFIER="${SIGNALLANES_BUNDLE_ID:-local.signal-lanes}"
-CODE_SIGN_IDENTITY="${SIGNALLANES_CODE_SIGN_IDENTITY:--}"
+DEFAULT_CODE_SIGN_IDENTITY="SignalLanes Local Code Signing"
+CODE_SIGN_IDENTITY="${SIGNALLANES_CODE_SIGN_IDENTITY:-}"
+CODE_SIGN_TIMEOUT="${SIGNALLANES_CODE_SIGN_TIMEOUT:-20}"
+
+if [[ -z "$CODE_SIGN_IDENTITY" ]]; then
+  if security find-certificate -c "$DEFAULT_CODE_SIGN_IDENTITY" "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; then
+    CODE_SIGN_IDENTITY="$DEFAULT_CODE_SIGN_IDENTITY"
+  else
+    CODE_SIGN_IDENTITY="-"
+  fi
+fi
+
+sign_app() {
+  local identity="$1"
+  local app_dir="$2"
+
+  if [[ "$identity" == "-" ]]; then
+    codesign --force --deep --sign "$identity" "$app_dir"
+    CODE_SIGN_IDENTITY="$identity"
+    return
+  fi
+
+  codesign --force --deep --sign "$identity" "$app_dir" &
+  local codesign_pid=$!
+  local elapsed=0
+
+  while kill -0 "$codesign_pid" 2>/dev/null; do
+    if (( elapsed >= CODE_SIGN_TIMEOUT )); then
+      echo "codesign timed out after ${CODE_SIGN_TIMEOUT}s with '$identity'; falling back to ad-hoc signing." >&2
+      pkill -P "$codesign_pid" 2>/dev/null || true
+      kill "$codesign_pid" 2>/dev/null || true
+      wait "$codesign_pid" 2>/dev/null || true
+      codesign --force --deep --sign - "$app_dir"
+      CODE_SIGN_IDENTITY="-"
+      return
+    fi
+
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "$codesign_pid"
+  CODE_SIGN_IDENTITY="$identity"
+}
 
 swift build -c release --product SignalLanes
 swift build -c release --product signallanesctl
@@ -66,8 +109,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign "$CODE_SIGN_IDENTITY" "$APP_DIR"
+sign_app "$CODE_SIGN_IDENTITY" "$APP_DIR"
 
 echo "Built $APP_DIR"
+echo "Signed with: $CODE_SIGN_IDENTITY"
 echo "Run: open '$APP_DIR'"
 echo "CLI: $ROOT_DIR/.build/release/signallanesctl"

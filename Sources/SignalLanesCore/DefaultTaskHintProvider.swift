@@ -8,7 +8,9 @@ public enum DefaultTaskHintProvider {
 
         return CompositeTaskHintProvider([
             CodexSessionStatusProvider(),
-            AntigravityLogStatusProvider(),
+            AntigravityLogStatusProvider(
+                visibleWindowTitlesProvider: AntigravityLogStatusProvider.visibleAntigravityWindowTitles
+            ),
             AntigravityLogStatusProvider(
                 agentID: "vscode",
                 sourceName: "Visual Studio Code",

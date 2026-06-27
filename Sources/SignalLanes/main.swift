@@ -2,6 +2,15 @@ import AppKit
 import ApplicationServices
 import SignalLanesCore
 
+private final class TaskGroupMenuPayload: NSObject {
+    let group: TaskGroupReport
+
+    init(group: TaskGroupReport) {
+        self.group = group
+        super.init()
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum DefaultsKey {
@@ -45,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        requestAccessibilityPermissionIfNeeded()
 
         if let button = statusItem.button {
             button.imagePosition = .imageOnly
@@ -239,6 +249,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let submenu = NSMenu()
+        let openItem = NSMenuItem(
+            title: localized.openSession,
+            action: #selector(activateTaskGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        openItem.target = self
+        openItem.representedObject = TaskGroupMenuPayload(group: group)
+        submenu.addItem(openItem)
+        submenu.addItem(NSMenuItem.separator())
+
         let reasonText = group.count == 1
             ? localized.localizedReason(group.tasks[0].reason)
             : localized.groupedSessions(count: group.count)
@@ -434,6 +454,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(overrideStore.directoryURL)
     }
 
+    @objc private func activateTaskGroupFromMenu(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? TaskGroupMenuPayload else {
+            return
+        }
+
+        let group = payload.group
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [floatingWindowController] in
+            floatingWindowController.activate(group: group)
+        }
+    }
+
     @objc private func toggleFloatingLight() {
         floatingWindowController.setEnabled(!floatingWindowController.isEnabled)
         if let lastResult {
@@ -507,6 +538,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let lastResult {
             statusItem.menu = makeMenu(result: lastResult)
         }
+    }
+
+    private func requestAccessibilityPermissionIfNeeded() {
+        guard !AXIsProcessTrusted() else {
+            return
+        }
+
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 
     @objc private func quit() {

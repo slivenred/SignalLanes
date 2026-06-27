@@ -1,3 +1,6 @@
+import AppKit
+import ApplicationServices
+import CoreGraphics
 import Foundation
 
 public struct AntigravityLogStatusProvider: TaskHintProviding {
@@ -124,6 +127,7 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
     private let maxTailBytes: UInt64
     private let maxFiles: Int
     private let parseCache: ParseCache
+    private let visibleWindowTitlesProvider: (@Sendable () -> [String]?)?
 
     public init(
         agentID: String = "antigravity",
@@ -134,7 +138,8 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
         maxPendingPermissionAge: TimeInterval = 5 * 60,
         maxActiveStatusAge: TimeInterval = 10 * 60,
         maxTailBytes: UInt64 = 2_000_000,
-        maxFiles: Int = 12
+        maxFiles: Int = 12,
+        visibleWindowTitlesProvider: (@Sendable () -> [String]?)? = nil
     ) {
         self.agentID = agentID
         self.sourceName = sourceName
@@ -155,10 +160,12 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
         self.maxActiveStatusAge = maxActiveStatusAge
         self.maxTailBytes = maxTailBytes
         self.maxFiles = maxFiles
+        self.visibleWindowTitlesProvider = visibleWindowTitlesProvider
         parseCache = ParseCache()
     }
 
     public func taskHints(now: Date) -> [TaskHint] {
+        let visibleWindowTitles = visibleWindowTitlesProvider.flatMap { $0() }
         let statuses = logFiles(now: now).reduce(into: [String: SessionStatus]()) { partial, logFile in
             for status in parseLogFile(logFile) {
                 guard status.updatedAt >= now.addingTimeInterval(-maxStatusAge) else {
@@ -174,20 +181,52 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
 
         return statuses.values.compactMap { status in
             let visibleStatus = outputStatus(for: status, now: now)
-            guard shouldReport(visibleStatus) else {
+            guard let reconciledStatus = reconcileWithVisibleWindowTitles(
+                visibleStatus,
+                visibleWindowTitles: visibleWindowTitles
+            ),
+                  shouldReport(reconciledStatus)
+            else {
                 return nil
             }
 
             return TaskHint(
                 agentID: agentID,
-                sessionID: visibleStatus.sessionID,
-                title: visibleStatus.title,
-                projectPath: visibleStatus.projectPath,
-                state: visibleStatus.state,
-                reason: visibleStatus.reason,
-                updatedAt: visibleStatus.updatedAt
+                sessionID: reconciledStatus.sessionID,
+                title: reconciledStatus.title,
+                projectPath: reconciledStatus.projectPath,
+                state: reconciledStatus.state,
+                reason: reconciledStatus.reason,
+                updatedAt: reconciledStatus.updatedAt
             )
         }
+    }
+
+    private func reconcileWithVisibleWindowTitles(
+        _ status: SessionStatus,
+        visibleWindowTitles: [String]?
+    ) -> SessionStatus? {
+        guard let visibleWindowTitles else {
+            return status
+        }
+
+        let windowTitles = visibleWindowTitles.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !windowTitles.isEmpty,
+              let windowTitle = windowTitles.first(where: { visibleWindowTitleMatches($0, status: status) })
+        else {
+            return nil
+        }
+
+        guard let projectPath = status.projectPath,
+              let projectName = visibleWindowProjectName(from: windowTitle),
+              let canonicalProjectPath = canonicalProjectPath(projectPath, matchingVisibleProjectName: projectName)
+        else {
+            return status
+        }
+
+        var reconciledStatus = status
+        reconciledStatus.projectPath = canonicalProjectPath
+        return reconciledStatus
     }
 
     private func shouldReport(_ status: SessionStatus) -> Bool {
@@ -893,6 +932,179 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
             return "\(sourceName) session is running.\(suffix)"
         case .idle:
             return "\(sourceName) session is idle.\(suffix)"
+        }
+    }
+
+    private func visibleWindowTitleMatches(_ title: String, status: SessionStatus) -> Bool {
+        let candidates = [
+            status.title,
+            status.projectPath.map { URL(fileURLWithPath: $0).lastPathComponent },
+            status.projectPath
+        ].compactMap { $0 }
+
+        return candidates.contains { windowTitleMatches(title, candidate: $0) }
+    }
+
+    private func windowTitleMatches(_ windowTitle: String, candidate: String) -> Bool {
+        let normalizedTitle = normalizedWindowMatchString(windowTitle)
+        let normalizedCandidate = normalizedWindowMatchString(candidate)
+        guard !normalizedCandidate.isEmpty else {
+            return false
+        }
+
+        if normalizedTitle.contains(normalizedCandidate) {
+            return true
+        }
+
+        let prefixLength = min(18, normalizedCandidate.count)
+        guard prefixLength >= 10 else {
+            return false
+        }
+
+        let prefix = String(normalizedCandidate.prefix(prefixLength))
+        return normalizedTitle.contains(prefix)
+    }
+
+    private func visibleWindowProjectName(from windowTitle: String) -> String? {
+        let separators = [" — ", " – ", " - "]
+        for separator in separators {
+            if let range = windowTitle.range(of: separator) {
+                let projectName = String(windowTitle[..<range.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return projectName.isEmpty ? nil : projectName
+            }
+        }
+
+        let trimmedTitle = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? nil : trimmedTitle
+    }
+
+    private func canonicalProjectPath(_ projectPath: String, matchingVisibleProjectName projectName: String) -> String? {
+        let normalizedProjectName = normalizedWindowMatchString(projectName)
+        guard !normalizedProjectName.isEmpty else {
+            return nil
+        }
+
+        let url = URL(fileURLWithPath: projectPath).standardizedFileURL
+        let components = url.pathComponents
+        guard components.count > 1 else {
+            return nil
+        }
+
+        for index in stride(from: components.count - 1, through: 1, by: -1) {
+            let component = components[index]
+            guard normalizedWindowMatchString(component) == normalizedProjectName else {
+                continue
+            }
+
+            return URL(fileURLWithPath: "/" + components[1...index].joined(separator: "/"))
+                .standardizedFileURL
+                .path
+        }
+
+        return nil
+    }
+
+    private func normalizedWindowMatchString(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "—", with: " ")
+            .replacingOccurrences(of: "–", with: " ")
+            .replacingOccurrences(of: "/", with: " ")
+            .replacingOccurrences(of: "…", with: "")
+            .split(separator: " ")
+            .joined(separator: " ")
+    }
+
+    static func visibleAntigravityWindowTitles() -> [String]? {
+        let coreGraphicsTitles = coreGraphicsAntigravityWindowTitles()
+        if !coreGraphicsTitles.isEmpty {
+            return coreGraphicsTitles
+        }
+
+        let accessibilityTitles = accessibilityAntigravityWindowTitles()
+        if !accessibilityTitles.isEmpty {
+            return accessibilityTitles
+        }
+
+        return isAntigravityRunning() ? nil : []
+    }
+
+    private static func coreGraphicsAntigravityWindowTitles() -> [String] {
+        let windowList = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return uniqueNonEmptyTitles(windowList.compactMap { window in
+            guard (window[kCGWindowOwnerName as String] as? String) == "Antigravity IDE",
+                  (window[kCGWindowLayer as String] as? Int) == 0,
+                  let title = window[kCGWindowName as String] as? String
+            else {
+                return nil
+            }
+
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedTitle.isEmpty ? nil : trimmedTitle
+        })
+    }
+
+    private static func accessibilityAntigravityWindowTitles() -> [String] {
+        uniqueNonEmptyTitles(antigravityApplications().flatMap { application -> [String] in
+            let appElement = AXUIElementCreateApplication(application.processIdentifier)
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value) == .success,
+                  let windows = value as? [AXUIElement]
+            else {
+                return []
+            }
+
+            return windows.compactMap { window in
+                var titleValue: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleValue) == .success,
+                      let title = titleValue as? String
+                else {
+                    return nil
+                }
+
+                let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmedTitle.isEmpty ? nil : trimmedTitle
+            }
+        })
+    }
+
+    private static func antigravityApplications() -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { application in
+            guard !application.isTerminated else {
+                return false
+            }
+
+            if let bundleIdentifier = application.bundleIdentifier?.lowercased(),
+               [
+                "com.google.antigravity",
+                "com.google.antigravity-ide",
+                "com.googlelabs.antigravity",
+                "com.googlelabs.antigravityide"
+               ].contains(bundleIdentifier) {
+                return true
+            }
+
+            return application.localizedName == "Antigravity IDE"
+                || application.bundleURL?.deletingPathExtension().lastPathComponent == "Antigravity IDE"
+        }
+    }
+
+    private static func isAntigravityRunning() -> Bool {
+        !antigravityApplications().isEmpty
+    }
+
+    private static func uniqueNonEmptyTitles(_ titles: [String]) -> [String] {
+        var seen = Set<String>()
+        return titles.compactMap { title in
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedTitle.isEmpty, seen.insert(trimmedTitle).inserted else {
+                return nil
+            }
+
+            return trimmedTitle
         }
     }
 

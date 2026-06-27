@@ -872,7 +872,7 @@ private func testCodexSessionProviderMarksAbortedTurnIdleImmediately() throws {
     expect(hints.first?.state == .idle, "aborted Codex turns should become idle immediately")
 }
 
-private func testCodexSessionProviderMarksPendingBrowserApprovalWaiting() throws {
+private func testCodexSessionProviderTreatsPendingBrowserOperationAsWorking() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
@@ -882,13 +882,13 @@ private func testCodexSessionProviderMarksPendingBrowserApprovalWaiting() throws
 
     let sessionURL = rootURL
         .appendingPathComponent("2026/05/30", isDirectory: true)
-        .appendingPathComponent("rollout-pending-browser-approval.jsonl")
+        .appendingPathComponent("rollout-pending-browser-operation.jsonl")
     try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     let baseDate = Date(timeIntervalSince1970: 6_750)
     let jsonl = #"""
     {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"pending-browser-codex-session","cwd":"/tmp/browser-project","timestamp":"2026-05-30T10:00:00.000Z"}}
-    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"js","namespace":"mcp__node_repl","call_id":"call-browser-approval","arguments":"{\"title\":\"Verify styled preview\",\"code\":\"await tab.goto('http://127.0.0.1:4178/tmp/preview.html');\"}"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"js","namespace":"mcp__node_repl","call_id":"call-browser-operation","arguments":"{\"title\":\"Verify styled preview\",\"code\":\"await tab.goto('http://127.0.0.1:4178/tmp/preview.html');\"}"}}
     {"timestamp":"2026-05-30T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{}}}
     """#
     try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
@@ -904,9 +904,46 @@ private func testCodexSessionProviderMarksPendingBrowserApprovalWaiting() throws
     )
     let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
 
-    expect(hints.count == 1, "Codex provider should keep pending browser approval sessions visible")
-    expect(hints.first?.state == .waitingForPermission, "pending browser approval should be waiting")
-    expect(hints.first?.reason == "Codex Desktop session is waiting for permission.", "pending browser approval should explain the waiting state")
+    expect(hints.count == 1, "Codex provider should keep pending browser operation sessions visible")
+    expect(hints.first?.state == .working, "pending browser operation should be working, not waiting")
+    expect(hints.first?.reason == "Codex Desktop session is active.", "pending browser operation should explain the active state")
+}
+
+private func testCodexSessionProviderTreatsBuiltInBrowserToolAsWorking() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let sessionURL = rootURL
+        .appendingPathComponent("2026/05/30", isDirectory: true)
+        .appendingPathComponent("rollout-built-in-browser-operation.jsonl")
+    try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 6_755)
+    let jsonl = #"""
+    {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"built-in-browser-codex-session","cwd":"/tmp/browser-project","timestamp":"2026-05-30T10:00:00.000Z"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"open_page","namespace":"browser","call_id":"call-built-in-browser-operation","arguments":"{\"url\":\"http://127.0.0.1:4178/tmp/preview.html\"}"}}
+    {"timestamp":"2026-05-30T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{}}}
+    """#
+    try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes(
+        [.modificationDate: baseDate.addingTimeInterval(5)],
+        ofItemAtPath: sessionURL.path
+    )
+
+    let provider = CodexSessionStatusProvider(
+        rootURL: rootURL,
+        maxSessionAge: 600,
+        maxActiveAge: 120
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "Codex provider should keep built-in browser operation sessions visible")
+    expect(hints.first?.state == .working, "built-in browser operation should be working, not waiting")
+    expect(hints.first?.reason == "Codex Desktop session is active.", "built-in browser operation should explain the active state")
 }
 
 private func testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting() throws {
@@ -1475,6 +1512,94 @@ private func testAntigravityLogLaunchRootReplacesNestedActivityPath() throws {
     )
 }
 
+private func testAntigravityLogVisibleWindowCanonicalizesNestedProjectPath() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let parentProjectURL = URL(fileURLWithPath: "/tmp/heist combine", isDirectory: true)
+    let nestedProjectURL = parentProjectURL
+        .appendingPathComponent("heist-combined", isDirectory: true)
+        .appendingPathComponent("scripts", isDirectory: true)
+    let logURL = rootURL
+        .appendingPathComponent("logs/20260530T120000/window1/exthost/Anthropic.claude-code", isDirectory: true)
+        .appendingPathComponent("Claude VSCode.log")
+    try fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 2_258)
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
+    func line(offset: TimeInterval, _ text: String) -> String {
+        "\(formatter.string(from: baseDate.addingTimeInterval(offset))) [info] \(text)"
+    }
+
+    let log = [
+        line(offset: 0, #"Received message from webview: {"type":"launch_claude","cwd":"\#(nestedProjectURL.path)","permissionMode":"default","thinkingLevel":"default_on"}"#),
+        line(offset: 1, #"Received message from webview: {"type":"request","requestId":"1","request":{"type":"update_session_state","sessionId":"session-a","state":"running","title":"Page quality check"}}"#)
+    ].joined(separator: "\n")
+    try log.write(to: logURL, atomically: true, encoding: .utf8)
+
+    let provider = AntigravityLogStatusProvider(
+        rootURLs: [rootURL],
+        maxStatusAge: 600,
+        visibleWindowTitlesProvider: {
+            ["heist combine - Page quality check"]
+        }
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "visible Antigravity window should keep the matching session")
+    expect(
+        hints.first?.projectPath == parentProjectURL.standardizedFileURL.path,
+        "visible Antigravity window project name should replace stale nested workspace paths"
+    )
+}
+
+private func testAntigravityLogSkipsActiveSessionWithoutVisibleWindow() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let logURL = rootURL
+        .appendingPathComponent("logs/20260530T120000/window1/exthost/Anthropic.claude-code", isDirectory: true)
+        .appendingPathComponent("Claude VSCode.log")
+    try fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 2_259)
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
+    func line(offset: TimeInterval, _ text: String) -> String {
+        "\(formatter.string(from: baseDate.addingTimeInterval(offset))) [info] \(text)"
+    }
+
+    let log = [
+        line(offset: 0, #"Received message from webview: {"type":"launch_claude","cwd":"/tmp/example/scripts","permissionMode":"default","thinkingLevel":"default_on"}"#),
+        line(offset: 1, #"Received message from webview: {"type":"request","requestId":"1","request":{"type":"update_session_state","sessionId":"session-a","state":"running","title":"Closed example task"}}"#)
+    ].joined(separator: "\n")
+    try log.write(to: logURL, atomically: true, encoding: .utf8)
+
+    let provider = AntigravityLogStatusProvider(
+        rootURLs: [rootURL],
+        maxStatusAge: 600,
+        visibleWindowTitlesProvider: {
+            ["other project - Other task"]
+        }
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.isEmpty, "active Antigravity log session without a matching visible window should not be reported")
+}
+
 private func testAntigravityLogIgnoresHomeConfigActivityPaths() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
@@ -1775,7 +1900,8 @@ do {
     try testCodexSessionProviderDoesNotMarkMetadataOnlySessionWorking()
     try testCodexSessionProviderMarksCompletedTurnIdleImmediately()
     try testCodexSessionProviderMarksAbortedTurnIdleImmediately()
-    try testCodexSessionProviderMarksPendingBrowserApprovalWaiting()
+    try testCodexSessionProviderTreatsPendingBrowserOperationAsWorking()
+    try testCodexSessionProviderTreatsBuiltInBrowserToolAsWorking()
     try testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting()
     try testCodexSessionProviderMarksPendingPatchApprovalWaiting()
     try testCodexSessionProviderDoesNotKeepCompletedPatchWaiting()
@@ -1790,6 +1916,8 @@ do {
     try testAntigravityLogSessionlessActivityInfersProjectFromFilePath()
     try testAntigravityLogAuditActivityInfersProjectRoot()
     try testAntigravityLogLaunchRootReplacesNestedActivityPath()
+    try testAntigravityLogVisibleWindowCanonicalizesNestedProjectPath()
+    try testAntigravityLogSkipsActiveSessionWithoutVisibleWindow()
     try testAntigravityLogIgnoresHomeConfigActivityPaths()
     try testAntigravityLogMergesSingleProjectFallbackIntoConcreteSession()
     try testAntigravityLogTailCanStartInsideUTF8Character()

@@ -135,6 +135,10 @@ final class FloatingSignalLanesWindowController: NSObject, NSWindowDelegate {
         updateToolTip()
     }
 
+    func activate(group: TaskGroupReport) {
+        indicatorView.activate(group: group)
+    }
+
     func update(result: DetectionResult) {
         indicatorView.result = result
         indicatorView.fallbackState = result.overallState
@@ -330,7 +334,7 @@ private final class FloatingSignalLanesView: NSView {
         }
     }
 
-    private let dragThreshold: CGFloat = 4
+    private let dragThreshold: CGFloat = 8
     private var cachedDisplayGroups: [DisplayTaskGroup] = []
     private var mouseDownContext: MouseDownContext?
     private var selectedFilterState: LightState?
@@ -431,7 +435,7 @@ private final class FloatingSignalLanesView: NSView {
         }
 
         if !context.didDrag, let clickedGroup = context.clickedGroup {
-            activateApplication(for: clickedGroup)
+            activate(group: clickedGroup)
         }
     }
 
@@ -1418,7 +1422,7 @@ private final class FloatingSignalLanesView: NSView {
         return "...\(sessionID.suffix(6))"
     }
 
-    private func activateApplication(for group: DisplayTaskGroup) {
+    func activate(group: TaskGroupReport) {
         if activateCodexTarget(for: group) {
             return
         }
@@ -1427,6 +1431,10 @@ private final class FloatingSignalLanesView: NSView {
         case .activated:
             return
         case .unavailable:
+            if group.agentID == "antigravity" {
+                NSSound.beep()
+                return
+            }
             break
         }
 
@@ -1466,6 +1474,23 @@ private final class FloatingSignalLanesView: NSView {
             return .unavailable
         }
 
+        if group.agentID == "antigravity",
+           pressAntigravityWindowMenuItem(
+            matchingAnyOf: candidates,
+            in: applications
+           ) {
+            return .activated
+        }
+
+        if group.agentID == "antigravity",
+           let projectPath = group.projectPath {
+            for application in applications {
+                if openProject(projectPath, in: application, agentID: group.agentID) {
+                    return .activated
+                }
+            }
+        }
+
         for application in applications {
             if raiseWindow(matchingAnyOf: candidates, in: application) {
                 return .activated
@@ -1474,6 +1499,68 @@ private final class FloatingSignalLanesView: NSView {
 
         return .unavailable
     }
+
+    private func openProject(_ projectPath: String, in application: NSRunningApplication, agentID: String) -> Bool {
+        let projectURL = URL(fileURLWithPath: projectPath)
+        guard FileManager.default.fileExists(atPath: projectURL.path),
+              let appURL = application.bundleURL ?? applicationURL(for: agentID)
+        else {
+            return false
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open(
+            [projectURL],
+            withApplicationAt: appURL,
+            configuration: configuration
+        )
+        return true
+    }
+
+    private func pressAntigravityWindowMenuItem(
+        matchingAnyOf candidates: [String],
+        in applications: [NSRunningApplication]
+    ) -> Bool {
+        for application in applications {
+            application.unhide()
+            _ = activate(application)
+
+            let appElement = AXUIElementCreateApplication(application.processIdentifier)
+            guard let menuBar = accessibilityElementAttribute(kAXMenuBarAttribute as CFString, in: appElement) else {
+                continue
+            }
+
+            for menuBarItem in accessibilityChildren(for: menuBar) {
+                guard let menuName = accessibilityStringAttribute(kAXTitleAttribute as CFString, in: menuBarItem),
+                      menuName == "Window" || menuName == "視窗"
+                else {
+                    continue
+                }
+
+                for menu in accessibilityChildren(for: menuBarItem) {
+                    for candidate in candidates {
+                        guard let item = accessibilityChildren(for: menu).first(where: { menuItem in
+                            guard let title = accessibilityStringAttribute(kAXTitleAttribute as CFString, in: menuItem) else {
+                                return false
+                            }
+
+                            return windowTitle(title, matches: candidate)
+                        }) else {
+                            continue
+                        }
+
+                        if AXUIElementPerformAction(item, kAXPressAction as CFString) == .success {
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+
+        return false
+    }
+
     private func codexThreadURL(for sessionID: String) -> URL? {
         let allowedCharacters = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))
         guard let encodedSessionID = sessionID.addingPercentEncoding(withAllowedCharacters: allowedCharacters) else {
@@ -1544,13 +1631,15 @@ private final class FloatingSignalLanesView: NSView {
             return false
         }
 
-        for window in windows {
-            guard let title = accessibilityTitle(for: window),
-                  windowTitle(title, matchesAnyOf: candidates)
-            else {
+        for candidate in candidates {
+            guard let window = windows.first(where: { window in
+                guard let title = accessibilityTitle(for: window) else {
+                    return false
+                }
+                return windowTitle(title, matches: candidate)
+            }) else {
                 continue
             }
-
             application.unhide()
             _ = activate(application)
             AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
@@ -1570,13 +1659,39 @@ private final class FloatingSignalLanesView: NSView {
         application.activate()
     }
 
-    private func accessibilityTitle(for element: AXUIElement) -> String? {
+    private func accessibilityElementAttribute(_ attribute: CFString, in element: AXUIElement) -> AXUIElement? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &value) == .success else {
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value
+        else {
+            return nil
+        }
+
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
+    private func accessibilityChildren(for element: AXUIElement) -> [AXUIElement] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
+              let children = value as? [AXUIElement]
+        else {
+            return []
+        }
+
+        return children
+    }
+
+    private func accessibilityStringAttribute(_ attribute: CFString, in element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
             return nil
         }
 
         return value as? String
+    }
+
+    private func accessibilityTitle(for element: AXUIElement) -> String? {
+        accessibilityStringAttribute(kAXTitleAttribute as CFString, in: element)
     }
 
     private func restoreWindowIfMinimized(_ window: AXUIElement) {
@@ -1590,31 +1705,73 @@ private final class FloatingSignalLanesView: NSView {
         AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
     }
 
-    private func windowTitle(_ title: String, matchesAnyOf candidates: [String]) -> Bool {
+    private func windowTitle(_ title: String, matches: String) -> Bool {
         let normalizedTitle = normalizedWindowMatchString(title)
-        return candidates.contains { candidate in
-            let normalizedCandidate = normalizedWindowMatchString(candidate)
-            return !normalizedCandidate.isEmpty && normalizedTitle.contains(normalizedCandidate)
+        let normalizedCandidate = normalizedWindowMatchString(matches)
+        guard !normalizedCandidate.isEmpty else {
+            return false
         }
+
+        if normalizedTitle.contains(normalizedCandidate) {
+            return true
+        }
+
+        let prefixLength = min(22, normalizedCandidate.count)
+        guard prefixLength >= 12 else {
+            return false
+        }
+
+        let prefix = String(normalizedCandidate.prefix(prefixLength))
+        return normalizedTitle.contains(prefix)
     }
 
     private func windowTitleCandidates(for group: DisplayTaskGroup) -> [String] {
         var candidates: [String] = []
 
+        let titles = group.tasks.compactMap(\.title)
+
         if let projectPath = group.projectPath {
-            let projectName = projectName(for: projectPath)
-            candidates.append(contentsOf: [
-                projectName,
-                projectName.replacingOccurrences(of: "-", with: " "),
-                projectName.replacingOccurrences(of: "_", with: " "),
-                projectPath
-            ])
+            let projectCandidates = projectTitleCandidates(for: projectPath)
+            candidates.append(contentsOf: titles.flatMap { title in
+                projectCandidates.map { "\($0) — \(title)" }
+            })
+            candidates.append(contentsOf: projectCandidates)
+            candidates.append(projectPath)
         }
 
-        candidates.append(contentsOf: group.tasks.compactMap(\.title))
+        candidates.append(contentsOf: titles)
         candidates.append(contentsOf: group.sessionIDs)
 
-        return uniqueNonEmpty(candidates)
+        return uniqueNonEmpty(candidateVariants(from: candidates))
+    }
+
+    private func candidateVariants(from candidates: [String]) -> [String] {
+        candidates.flatMap { candidate in
+            let normalized = normalizedWindowMatchString(candidate)
+            guard normalized.count > 22 else {
+                return [candidate]
+            }
+
+            return [candidate, String(candidate.prefix(22))]
+        }
+    }
+
+    private func projectTitleCandidates(for path: String) -> [String] {
+        let url = URL(fileURLWithPath: path)
+        let components = url.pathComponents
+            .filter { component in
+                component != "/"
+                    && component != "Users"
+                    && component != NSUserName()
+            }
+        let tailComponents = Array(components.suffix(6).reversed())
+        return uniqueNonEmpty(tailComponents.flatMap { component in
+            [
+                component,
+                component.replacingOccurrences(of: "-", with: " "),
+                component.replacingOccurrences(of: "_", with: " ")
+            ]
+        })
     }
 
     private func uniqueNonEmpty(_ values: [String]) -> [String] {
