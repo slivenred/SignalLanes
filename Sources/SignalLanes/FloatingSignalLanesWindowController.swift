@@ -283,7 +283,6 @@ private final class FloatingSignalLanesView: NSView {
 
     private enum TargetWindowActivationResult {
         case activated
-        case permissionRequested
         case unavailable
     }
 
@@ -336,7 +335,6 @@ private final class FloatingSignalLanesView: NSView {
     private var mouseDownContext: MouseDownContext?
     private var selectedFilterState: LightState?
     private var scrollOffset = 0
-    private var didShowAccessibilityWindowActivationPermissionPrompt = false
 
     private var localized: SignalLanesLocalization {
         SignalLanesLocalization(language: language)
@@ -1426,7 +1424,7 @@ private final class FloatingSignalLanesView: NSView {
         }
 
         switch activateTargetWindow(for: group) {
-        case .activated, .permissionRequested:
+        case .activated:
             return
         case .unavailable:
             break
@@ -1468,10 +1466,6 @@ private final class FloatingSignalLanesView: NSView {
             return .unavailable
         }
 
-        guard canUseAccessibilityWindowActivation() else {
-            return requestAccessibilityWindowActivationPermission() ? .permissionRequested : .unavailable
-        }
-
         for application in applications {
             if raiseWindow(matchingAnyOf: candidates, in: application) {
                 return .activated
@@ -1480,58 +1474,6 @@ private final class FloatingSignalLanesView: NSView {
 
         return .unavailable
     }
-
-    private func canUseAccessibilityWindowActivation() -> Bool {
-        AXIsProcessTrusted()
-    }
-
-    private func requestAccessibilityWindowActivationPermission() -> Bool {
-        guard !AXIsProcessTrusted() else {
-            didShowAccessibilityWindowActivationPermissionPrompt = false
-            return false
-        }
-
-        guard !didShowAccessibilityWindowActivationPermissionPrompt else {
-            return false
-        }
-        didShowAccessibilityWindowActivationPermissionPrompt = true
-
-        NSApp.activate(ignoringOtherApps: true)
-
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = localized.accessibilityPermissionTitle
-        alert.informativeText = localized.accessibilityPermissionMessage
-        alert.addButton(withTitle: localized.openAccessibilitySettings)
-        alert.addButton(withTitle: localized.notNow)
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return true
-        }
-
-        requestAccessibilityPermissionPrompt()
-        openAccessibilitySettings()
-        return true
-    }
-
-    private func requestAccessibilityPermissionPrompt() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-    }
-
-    private func openAccessibilitySettings() {
-        for url in accessibilitySettingsURLs where NSWorkspace.shared.open(url) {
-            return
-        }
-    }
-
-    private var accessibilitySettingsURLs: [URL] {
-        [
-            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
-            URL(string: "x-apple.systempreferences:com.apple.preference.security")
-        ].compactMap(\.self)
-    }
-
     private func codexThreadURL(for sessionID: String) -> URL? {
         let allowedCharacters = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))
         guard let encodedSessionID = sessionID.addingPercentEncoding(withAllowedCharacters: allowedCharacters) else {
