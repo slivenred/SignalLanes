@@ -1176,6 +1176,51 @@ private func testAntigravityLogKeepsRecentPermissionOverRunningUpdate() throws {
     expect(staleHints.first?.state == .working, "stale Antigravity permission should fall back instead of staying yellow forever")
 }
 
+private func testAntigravityLogMergesFallbackProjectIntoSessionWithoutProject() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let logURL = rootURL
+        .appendingPathComponent("logs/20260530T120000/window4/exthost/Anthropic.claude-code", isDirectory: true)
+        .appendingPathComponent("Claude VSCode.log")
+    try fileManager.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 1_250)
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
+    func webviewLine(offset: TimeInterval, _ json: String) -> String {
+        "\(formatter.string(from: baseDate.addingTimeInterval(offset))) [info] Received message from webview: \(json)"
+    }
+
+    func activityLine(offset: TimeInterval, _ message: String) -> String {
+        "\(formatter.string(from: baseDate.addingTimeInterval(offset))) [info] From claude: 2026-05-30T12:00:00.000Z [DEBUG] \(message)"
+    }
+
+    let log = [
+        activityLine(offset: 0, "Writing to temp file: /tmp/project/src/app.swift.tmp.123"),
+        webviewLine(offset: 1, #"{"type":"request","requestId":"1","request":{"type":"update_session_state","sessionId":"session-without-project","state":"waiting_input","title":"Approve deploy"}}"#)
+    ].joined(separator: "\n")
+    try log.write(to: logURL, atomically: true, encoding: .utf8)
+
+    let provider = AntigravityLogStatusProvider(
+        rootURLs: [rootURL],
+        maxStatusAge: 600,
+        maxPendingPermissionAge: 300
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "fallback project activity should merge into the one concrete session")
+    expect(hints.first?.sessionID == "session-without-project", "merged hint should keep the concrete session ID")
+    expect(hints.first?.projectPath == "/tmp/project", "merged hint should inherit fallback project path")
+    expect(hints.first?.state == .waitingForPermission, "merged hint should keep the concrete waiting state")
+}
+
 private func testAntigravityRenamePermissionTargetsFollowingSessionUpdate() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
@@ -1738,6 +1783,7 @@ do {
     try testCodexSessionProviderTailCanStartInsideUTF8Character()
     try testCodexSessionProviderSkipsOldSessions()
     try testAntigravityLogKeepsRecentPermissionOverRunningUpdate()
+    try testAntigravityLogMergesFallbackProjectIntoSessionWithoutProject()
     try testAntigravityRenamePermissionTargetsFollowingSessionUpdate()
     try testAntigravityLogActivityAfterIdleMarksRunning()
     try testAntigravityLogSessionlessClaudeActivityMarksRunning()

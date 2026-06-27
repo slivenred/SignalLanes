@@ -281,6 +281,12 @@ private final class FloatingSignalLanesView: NSView {
         var bundleIdentifiers: Set<String>
     }
 
+    private enum TargetWindowActivationResult {
+        case activated
+        case permissionRequested
+        case unavailable
+    }
+
     private struct MouseDownContext {
         var clickedGroup: DisplayTaskGroup?
         var clickedFilterState: LightState?
@@ -789,18 +795,34 @@ private final class FloatingSignalLanesView: NSView {
         let badge = groupBadge(for: group)
         let badgeWidth = badge.map { widthForBadge($0) } ?? 0
         let titleX = rowRect.minX + 31
+        let hasSubtitle = displaySize != .small
+        let titleY = hasSubtitle ? rowRect.midY + 1 : rowRect.midY - 7.5
 
         drawText(
             groupTitle(group),
             in: NSRect(
                 x: titleX,
-                y: rowRect.midY - 7.5,
+                y: titleY,
                 width: max(24, rowRect.maxX - titleX - 12 - badgeWidth),
                 height: 16
             ),
             font: .systemFont(ofSize: displaySize == .large ? 12.5 : 12, weight: .semibold),
             color: primaryTextColor
         )
+
+        if hasSubtitle {
+            drawText(
+                groupSubtitle(group),
+                in: NSRect(
+                    x: titleX,
+                    y: rowRect.midY - 15,
+                    width: max(24, rowRect.maxX - titleX - 12 - badgeWidth),
+                    height: 14
+                ),
+                font: .systemFont(ofSize: displaySize == .large ? 10.8 : 10.3, weight: .medium),
+                color: secondaryTextColor
+            )
+        }
 
         if let badge {
             let badgeRect = NSRect(x: rowRect.maxX - badgeWidth - 8, y: rowRect.midY - 8, width: badgeWidth, height: 16)
@@ -868,6 +890,32 @@ private final class FloatingSignalLanesView: NSView {
             ?? group.tasks.first?.title
             ?? fallbackName()
         return "\(group.displayName) / \(projectLabel)"
+    }
+
+    private func groupSubtitle(_ group: DisplayTaskGroup) -> String {
+        var parts: [String] = []
+
+        if let projectPath = group.projectPath,
+           let title = group.tasks.first?.title,
+           title != projectName(for: projectPath) {
+            parts.append(title)
+        }
+
+        if let projectPath = group.projectPath {
+            parts.append(compactParentPath(for: projectPath))
+        }
+
+        if let sessionID = group.sessionIDs.first {
+            parts.append("session \(shortSessionID(sessionID))")
+        }
+
+        if group.count > 1 {
+            parts.append(localized.groupedSessions(count: group.count))
+        } else if let pid = group.processes.first?.pid {
+            parts.append("PID \(pid)")
+        }
+
+        return parts.isEmpty ? localized.openSession : parts.joined(separator: "  •  ")
     }
 
     private func groupBadge(for group: DisplayTaskGroup) -> String? {
@@ -1002,9 +1050,9 @@ private final class FloatingSignalLanesView: NSView {
         case .small:
             return 1
         case .medium:
-            return 8
+            return 5
         case .large:
-            return 11
+            return 7
         }
     }
 
@@ -1022,9 +1070,9 @@ private final class FloatingSignalLanesView: NSView {
         case .small:
             return 32
         case .medium:
-            return 29
+            return 44
         case .large:
-            return 31
+            return 48
         }
     }
 
@@ -1351,13 +1399,36 @@ private final class FloatingSignalLanesView: NSView {
         URL(fileURLWithPath: path).lastPathComponent
     }
 
+    private func compactParentPath(for path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let parent = url.deletingLastPathComponent()
+        let project = url.lastPathComponent
+        let parentName = parent.lastPathComponent
+        guard !parentName.isEmpty else {
+            return project
+        }
+
+        return "\(parentName)/\(project)"
+    }
+
+    private func shortSessionID(_ sessionID: String) -> String {
+        guard sessionID.count > 10 else {
+            return sessionID
+        }
+
+        return "...\(sessionID.suffix(6))"
+    }
+
     private func activateApplication(for group: DisplayTaskGroup) {
         if activateCodexTarget(for: group) {
             return
         }
 
-        if activateProjectWindow(for: group) {
+        switch activateTargetWindow(for: group) {
+        case .activated, .permissionRequested:
             return
+        case .unavailable:
+            break
         }
 
         if activateRunningApplication(for: group) {
@@ -1385,31 +1456,73 @@ private final class FloatingSignalLanesView: NSView {
         return false
     }
 
-    private func activateProjectWindow(for group: DisplayTaskGroup) -> Bool {
-        guard let projectPath = group.projectPath else {
-            return false
+    private func activateTargetWindow(for group: DisplayTaskGroup) -> TargetWindowActivationResult {
+        let candidates = windowTitleCandidates(for: group)
+        guard !candidates.isEmpty else {
+            return .unavailable
+        }
+
+        let applications = matchingRunningApplications(for: group)
+        guard !applications.isEmpty else {
+            return .unavailable
         }
 
         guard canUseAccessibilityWindowActivation() else {
-            return false
+            requestAccessibilityWindowActivationPermission()
+            return .permissionRequested
         }
 
-        let candidates = windowTitleCandidates(for: projectPath)
-        guard !candidates.isEmpty else {
-            return false
-        }
-
-        for application in matchingRunningApplications(for: group) {
+        for application in applications {
             if raiseWindow(matchingAnyOf: candidates, in: application) {
-                return true
+                return .activated
             }
         }
 
-        return false
+        return .unavailable
     }
 
     private func canUseAccessibilityWindowActivation() -> Bool {
         AXIsProcessTrusted()
+    }
+
+    private func requestAccessibilityWindowActivationPermission() {
+        guard !AXIsProcessTrusted() else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = localized.accessibilityPermissionTitle
+        alert.informativeText = localized.accessibilityPermissionMessage
+        alert.addButton(withTitle: localized.openAccessibilitySettings)
+        alert.addButton(withTitle: localized.notNow)
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        requestAccessibilityPermissionPrompt()
+        openAccessibilitySettings()
+    }
+
+    private func requestAccessibilityPermissionPrompt() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    private func openAccessibilitySettings() {
+        for url in accessibilitySettingsURLs where NSWorkspace.shared.open(url) {
+            return
+        }
+    }
+
+    private var accessibilitySettingsURLs: [URL] {
+        [
+            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
+            URL(string: "x-apple.systempreferences:com.apple.preference.security")
+        ].compactMap(\.self)
     }
 
     private func codexThreadURL(for sessionID: String) -> URL? {
@@ -1429,7 +1542,7 @@ private final class FloatingSignalLanesView: NSView {
             }
 
             application.unhide()
-            if application.activate() {
+            if activate(application) {
                 return true
             }
         }
@@ -1440,7 +1553,7 @@ private final class FloatingSignalLanesView: NSView {
     private func activateRunningApplication(for group: DisplayTaskGroup) -> Bool {
         for application in matchingRunningApplications(for: group) {
             application.unhide()
-            if application.activate() {
+            if activate(application) {
                 return true
             }
         }
@@ -1490,14 +1603,19 @@ private final class FloatingSignalLanesView: NSView {
             }
 
             application.unhide()
+            AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
             restoreWindowIfMinimized(window)
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
             AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
             AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-            return application.activate()
+            return activate(application)
         }
 
         return false
+    }
+
+    private func activate(_ application: NSRunningApplication) -> Bool {
+        application.activate(options: [.activateAllWindows])
     }
 
     private func accessibilityTitle(for element: AXUIElement) -> String? {
@@ -1528,14 +1646,31 @@ private final class FloatingSignalLanesView: NSView {
         }
     }
 
-    private func windowTitleCandidates(for projectPath: String) -> [String] {
-        let projectName = projectName(for: projectPath)
-        return [
-            projectName,
-            projectName.replacingOccurrences(of: "-", with: " "),
-            projectName.replacingOccurrences(of: "_", with: " "),
-            projectPath
-        ].filter { !$0.isEmpty }
+    private func windowTitleCandidates(for group: DisplayTaskGroup) -> [String] {
+        var candidates: [String] = []
+
+        if let projectPath = group.projectPath {
+            let projectName = projectName(for: projectPath)
+            candidates.append(contentsOf: [
+                projectName,
+                projectName.replacingOccurrences(of: "-", with: " "),
+                projectName.replacingOccurrences(of: "_", with: " "),
+                projectPath
+            ])
+        }
+
+        candidates.append(contentsOf: group.tasks.compactMap(\.title))
+        candidates.append(contentsOf: group.sessionIDs)
+
+        return uniqueNonEmpty(candidates)
+    }
+
+    private func uniqueNonEmpty(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { value in
+            let normalized = normalizedWindowMatchString(value)
+            return !normalized.isEmpty && seen.insert(normalized).inserted
+        }
     }
 
     private func normalizedWindowMatchString(_ value: String) -> String {
@@ -1602,6 +1737,8 @@ private final class FloatingSignalLanesView: NSView {
     private var activationBundleIdentifierHints: [String: [String]] {
         [
             "antigravity": [
+                "com.google.antigravity",
+                "com.google.antigravity-ide",
                 "com.googlelabs.antigravity",
                 "com.googlelabs.antigravityide"
             ],

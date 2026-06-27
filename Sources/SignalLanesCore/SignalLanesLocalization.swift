@@ -268,6 +268,50 @@ public struct SignalLanesLocalization: Sendable {
         }
     }
 
+    public var accessibilityPermissionTitle: String {
+        switch language {
+        case .english:
+            return "Allow precise window switching?"
+        case .traditionalChinese:
+            return "要啟用精準視窗切換嗎？"
+        case .simplifiedChinese:
+            return "要启用精准窗口切换吗？"
+        }
+    }
+
+    public var accessibilityPermissionMessage: String {
+        switch language {
+        case .english:
+            return "SignalLanes needs macOS Accessibility permission to bring the exact IDE window to the front when you click a row. Enable SignalLanes in System Settings > Privacy & Security > Accessibility, then click the row again."
+        case .traditionalChinese:
+            return "SignalLanes 需要 macOS「輔助使用」權限，才能在你點擊某一列時，把對應的 IDE 視窗精準帶到最前方。請在「系統設定 > 隱私權與安全性 > 輔助使用」啟用 SignalLanes，然後再點同一列一次。"
+        case .simplifiedChinese:
+            return "SignalLanes 需要 macOS“辅助功能”权限，才能在你点击某一行时，把对应的 IDE 窗口精准带到最前方。请在“系统设置 > 隐私与安全性 > 辅助功能”启用 SignalLanes，然后再点同一行一次。"
+        }
+    }
+
+    public var openAccessibilitySettings: String {
+        switch language {
+        case .english:
+            return "Open Accessibility Settings"
+        case .traditionalChinese:
+            return "開啟輔助使用設定"
+        case .simplifiedChinese:
+            return "打开辅助功能设置"
+        }
+    }
+
+    public var notNow: String {
+        switch language {
+        case .english:
+            return "Not Now"
+        case .traditionalChinese:
+            return "稍後"
+        case .simplifiedChinese:
+            return "稍后"
+        }
+    }
+
     public var openStatusFolder: String {
         switch language {
         case .english:

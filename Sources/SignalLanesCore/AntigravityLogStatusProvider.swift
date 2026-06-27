@@ -133,7 +133,7 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
         maxStatusAge: TimeInterval = 12 * 60 * 60,
         maxPendingPermissionAge: TimeInterval = 5 * 60,
         maxActiveStatusAge: TimeInterval = 10 * 60,
-        maxTailBytes: UInt64 = 300_000,
+        maxTailBytes: UInt64 = 2_000_000,
         maxFiles: Int = 12
     ) {
         self.agentID = agentID
@@ -503,13 +503,14 @@ public struct AntigravityLogStatusProvider: TaskHintProviding {
 
         let concreteStatuses = statuses.values.filter { status in
             status.sessionID != fallbackSessionID
-                && status.projectPath == fallbackProjectPath
+                && (status.projectPath == fallbackProjectPath || status.projectPath == nil)
         }
         if concreteStatuses.count == 1, var concreteStatus = concreteStatuses.first {
             let mergedState = max(concreteStatus.state, fallbackStatus.state)
             let usesFallbackActivity = fallbackStatus.state > concreteStatus.state
                 || (fallbackStatus.state == concreteStatus.state && fallbackStatus.updatedAt > concreteStatus.updatedAt)
             concreteStatus.state = mergedState
+            concreteStatus.projectPath = concreteStatus.projectPath ?? fallbackProjectPath
             concreteStatus.fallbackState = mergedState == .waitingForPermission
                 ? concreteStatus.fallbackState ?? fallbackStatus.fallbackState
                 : nil
