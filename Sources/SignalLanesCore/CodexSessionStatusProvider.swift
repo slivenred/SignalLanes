@@ -350,6 +350,10 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
             return true
         }
 
+        if name == "apply_patch" {
+            return true
+        }
+
         guard namespace == "mcp__node_repl" || name == "js" else {
             return false
         }

@@ -645,10 +645,22 @@ public final class AgentDetector {
     }
 
     private static func isOwnToolProcess(_ process: ProcessMetadata) -> Bool {
-        process.tokens.contains("signallanes")
+        let executable = executableName(fromCommandLine: process.snapshot.commandLine)
+        return executable == "signallanes"
+            || executable == "signallanesctl"
             || process.tokens.contains("signallanesctl")
             || process.snapshot.commandLine.contains(".build/debug/SignalLanes")
             || process.snapshot.commandLine.contains(".build/release/SignalLanes")
+    }
+
+    private static func executableName(fromCommandLine commandLine: String) -> String? {
+        guard let firstToken = commandLine.split(separator: " ", maxSplits: 1).first else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: String(firstToken))
+            .lastPathComponent
+            .lowercased()
     }
 
     private static func captureRoots(
@@ -791,20 +803,45 @@ public final class AgentDetector {
         var searchRange = commandLine.startIndex..<commandLine.endIndex
 
         while let range = commandLine.range(of: "cd ", options: [], range: searchRange) {
-            let valueStart = range.upperBound
-            let rest = commandLine[valueStart...]
-            let terminators = [" &&", ";", "'", "\""]
-                .compactMap { rest.range(of: $0)?.lowerBound }
-            let valueEnd = terminators.min() ?? commandLine.endIndex
-            let rawPath = String(commandLine[valueStart..<valueEnd])
+            let parsedArgument = cdArgument(in: commandLine[range.upperBound...])
+            if let rawPath = parsedArgument.value?
                 .replacingOccurrences(of: "\\ ", with: " ")
-            if let path = normalizeProjectPath(rawPath) {
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               let path = normalizeProjectPath(rawPath) {
                 paths.append(path)
             }
-            searchRange = valueEnd..<commandLine.endIndex
+            searchRange = parsedArgument.endIndex..<commandLine.endIndex
         }
 
         return paths
+    }
+
+    private static func cdArgument(in text: Substring) -> (value: String?, endIndex: String.Index) {
+        var start = text.startIndex
+        while start < text.endIndex, text[start] == " " {
+            start = text.index(after: start)
+        }
+
+        guard start < text.endIndex else {
+            return (nil, text.endIndex)
+        }
+
+        if text[start] == "\"" || text[start] == "'" {
+            let quote = text[start]
+            let valueStart = text.index(after: start)
+            var cursor = valueStart
+            while cursor < text.endIndex, text[cursor] != quote {
+                cursor = text.index(after: cursor)
+            }
+
+            let endIndex = cursor < text.endIndex ? text.index(after: cursor) : cursor
+            return (String(text[valueStart..<cursor]), endIndex)
+        }
+
+        let terminators = [" &&", ";", "'", "\"", "\n"]
+            .compactMap { text.range(of: $0)?.lowerBound }
+        let valueEnd = terminators.min() ?? text.endIndex
+        return (String(text[start..<valueEnd]), valueEnd)
     }
 
     private static func sessionID(fromCommandLine commandLine: String) -> String? {

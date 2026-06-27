@@ -83,6 +83,28 @@ private func testCodexCliPresenceIsWorking() throws {
     expect(result.reports.first?.source == .automatic, "codex report should be automatic")
 }
 
+private func testSignalLanesProjectPathDoesNotHideAgentProcess() throws {
+    let now = Date(timeIntervalSince1970: 100)
+    let detector = AgentDetector(
+        processProvider: StubProcessProvider(snapshotsValue: [
+            ProcessSnapshot(
+                pid: 10,
+                parentPID: 1,
+                cpuPercent: 0,
+                state: "S",
+                commandLine: "/opt/homebrew/bin/codex --cwd /Users/example/Documents/SignalLanes"
+            )
+        ]),
+        nowProvider: { now }
+    )
+
+    let result = try detector.detect()
+
+    expect(result.overallState == .working, "SignalLanes project path should not hide an active agent")
+    expect(result.reports.first?.id == "codex", "Codex in a SignalLanes checkout should still be reported")
+    expect(result.tasks.first?.projectPath == "/Users/example/Documents/SignalLanes", "project path should still be extracted")
+}
+
 private func testCodexDesktopProcessDoesNotBecomeGenericCodexTask() throws {
     let now = Date(timeIntervalSince1970: 100)
     let detector = AgentDetector(
@@ -364,6 +386,34 @@ private func testTasksSplitByProjectPath() throws {
     expect(tasks.map(\.projectPath) == ["/tmp/project-one", "/tmp/project-two"], "task queue should split multiple project paths")
     expect(tasks.first?.processes.map(\.pid) == [10], "first project task should keep its matching process")
     expect(tasks.last?.processes.map(\.pid) == [11], "second project task should keep its matching process")
+}
+
+private func testQuotedCDProjectPathIsExtracted() throws {
+    let now = Date(timeIntervalSince1970: 100)
+    let detector = AgentDetector(
+        definitions: [
+            AgentDefinition(
+                id: "sample",
+                displayName: "Sample Agent",
+                tokenMatchers: ["sample-agent"],
+                activityMode: .processPresence
+            )
+        ],
+        processProvider: StubProcessProvider(snapshotsValue: [
+            ProcessSnapshot(
+                pid: 10,
+                parentPID: 1,
+                cpuPercent: 0,
+                state: "S",
+                commandLine: "/bin/zsh -lc 'cd \"/tmp/Signal Lanes Project\" && sample-agent'"
+            )
+        ]),
+        nowProvider: { now }
+    )
+
+    let result = try detector.detect()
+
+    expect(result.tasks.first?.projectPath == "/tmp/Signal Lanes Project", "quoted cd project paths should be extracted")
 }
 
 private func testTaskHintsCreateAntigravityWaitingTask() throws {
@@ -893,6 +943,78 @@ private func testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting() th
 
     expect(hints.count == 1, "Codex provider should keep completed browser calls visible")
     expect(hints.first?.state == .working, "completed browser call should fall back to working, not waiting")
+}
+
+private func testCodexSessionProviderMarksPendingPatchApprovalWaiting() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let sessionURL = rootURL
+        .appendingPathComponent("2026/05/30", isDirectory: true)
+        .appendingPathComponent("rollout-pending-patch-approval.jsonl")
+    try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 6_765)
+    let jsonl = #"""
+    {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"pending-patch-codex-session","cwd":"/tmp/patch-project","timestamp":"2026-05-30T10:00:00.000Z"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call-patch-approval","name":"apply_patch","input":"*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch\n"}}
+    {"timestamp":"2026-05-30T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{}}}
+    """#
+    try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes(
+        [.modificationDate: baseDate.addingTimeInterval(5)],
+        ofItemAtPath: sessionURL.path
+    )
+
+    let provider = CodexSessionStatusProvider(
+        rootURL: rootURL,
+        maxSessionAge: 600,
+        maxActiveAge: 120
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "Codex provider should keep pending patch approval sessions visible")
+    expect(hints.first?.state == .waitingForPermission, "pending patch approval should be waiting")
+}
+
+private func testCodexSessionProviderDoesNotKeepCompletedPatchWaiting() throws {
+    let fileManager = FileManager.default
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
+    defer {
+        try? fileManager.removeItem(at: rootURL)
+    }
+
+    let sessionURL = rootURL
+        .appendingPathComponent("2026/05/30", isDirectory: true)
+        .appendingPathComponent("rollout-completed-patch-approval.jsonl")
+    try fileManager.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    let baseDate = Date(timeIntervalSince1970: 6_766)
+    let jsonl = #"""
+    {"timestamp":"2026-05-30T10:00:00.000Z","type":"session_meta","payload":{"id":"completed-patch-codex-session","cwd":"/tmp/patch-project","timestamp":"2026-05-30T10:00:00.000Z"}}
+    {"timestamp":"2026-05-30T10:00:01.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call-patch-complete","name":"apply_patch","input":"*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch\n"}}
+    {"timestamp":"2026-05-30T10:00:02.000Z","type":"event_msg","payload":{"type":"patch_apply_end","call_id":"call-patch-complete","success":true}}
+    """#
+    try jsonl.write(to: sessionURL, atomically: true, encoding: .utf8)
+    try fileManager.setAttributes(
+        [.modificationDate: baseDate.addingTimeInterval(5)],
+        ofItemAtPath: sessionURL.path
+    )
+
+    let provider = CodexSessionStatusProvider(
+        rootURL: rootURL,
+        maxSessionAge: 600,
+        maxActiveAge: 120
+    )
+    let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
+
+    expect(hints.count == 1, "Codex provider should keep completed patch sessions visible")
+    expect(hints.first?.state == .working, "completed patch call should fall back to working, not waiting")
 }
 
 private func testCodexSessionProviderMarksPendingEscalatedCommandWaiting() throws {
@@ -1584,6 +1706,7 @@ do {
     testLocalizationDefaultsAndParsesSupportedLanguages()
     testPSParserKeepsCommandWithSpaces()
     try testCodexCliPresenceIsWorking()
+    try testSignalLanesProjectPathDoesNotHideAgentProcess()
     try testCodexDesktopProcessDoesNotBecomeGenericCodexTask()
     try testManualWaitingOverrideWinsOverAutomaticWorking()
     try testPermissionFlagsDoNotImplyWaiting()
@@ -1594,6 +1717,7 @@ do {
     try testKnownIdleReportsCanBeIncluded()
     try testReportsCanBeGroupedByState()
     try testTasksSplitByProjectPath()
+    try testQuotedCDProjectPathIsExtracted()
     try testTaskHintsCreateAntigravityWaitingTask()
     try testIDELogHintsOverrideNoisyProcessAssessment()
     try testAntigravityCapturesClaudeChildProcess()
@@ -1608,6 +1732,8 @@ do {
     try testCodexSessionProviderMarksAbortedTurnIdleImmediately()
     try testCodexSessionProviderMarksPendingBrowserApprovalWaiting()
     try testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting()
+    try testCodexSessionProviderMarksPendingPatchApprovalWaiting()
+    try testCodexSessionProviderDoesNotKeepCompletedPatchWaiting()
     try testCodexSessionProviderMarksPendingEscalatedCommandWaiting()
     try testCodexSessionProviderTailCanStartInsideUTF8Character()
     try testCodexSessionProviderSkipsOldSessions()
