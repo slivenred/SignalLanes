@@ -767,6 +767,18 @@ public struct SignalLanesLocalization: Sendable {
             return "Process 存在，但未偵測到忙碌訊號。"
         case (.simplifiedChinese, "Process is present, but no busy signal was detected."):
             return "Process 存在，但未检测到忙碌信号。"
+        case (.traditionalChinese, "Codex session is active."):
+            return "Codex 工作階段正在活動。"
+        case (.simplifiedChinese, "Codex session is active."):
+            return "Codex 会话正在活动。"
+        case (.traditionalChinese, "Codex session is idle."):
+            return "Codex 工作階段目前閒置。"
+        case (.simplifiedChinese, "Codex session is idle."):
+            return "Codex 会话目前空闲。"
+        case (.traditionalChinese, "Codex session is waiting for permission."):
+            return "Codex 工作階段正在等待授權。"
+        case (.simplifiedChinese, "Codex session is waiting for permission."):
+            return "Codex 会话正在等待授权。"
         case (.traditionalChinese, "Codex Desktop session is active."):
             return "Codex Desktop 工作階段正在活動。"
         case (.simplifiedChinese, "Codex Desktop session is active."):

@@ -160,7 +160,12 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
             return nil
         }
 
-        let state = parsedSession.stateFromTail ?? .idle
+        guard let state = parsedSession.stateFromTail,
+              state != .idle
+        else {
+            return nil
+        }
+
         return TaskHint(
             agentID: "codex",
             sessionID: parsedSession.sessionID,
@@ -257,11 +262,11 @@ public struct CodexSessionStatusProvider: TaskHintProviding {
     private func reason(for state: LightState) -> String {
         switch state {
         case .waitingForPermission:
-            return "Codex Desktop session is waiting for permission."
+            return "Codex session is waiting for permission."
         case .working:
-            return "Codex Desktop session is active."
+            return "Codex session is active."
         case .idle:
-            return "Codex Desktop session is idle."
+            return "Codex session is idle."
         }
     }
 

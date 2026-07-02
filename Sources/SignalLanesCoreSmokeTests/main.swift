@@ -42,7 +42,7 @@ private func testLocalizationDefaultsAndParsesSupportedLanguages() {
     let simplified = SignalLanesLocalization(language: .simplifiedChinese)
     expect(traditional.stateDisplayName(.waitingForPermission).contains("黃燈"), "traditional Chinese should localize yellow status")
     expect(simplified.queueSummary(waiting: 1, running: 2, stopped: 3).contains("运行中"), "simplified Chinese should localize queue summary")
-    expect(traditional.localizedReason("Codex Desktop session is active.").contains("工作階段"), "traditional Chinese should localize common detector reasons")
+    expect(traditional.localizedReason("Codex session is active.").contains("工作階段"), "traditional Chinese should localize common detector reasons")
     expect(simplified.localizedReason("Antigravity Claude log shows recent activity.").contains("近期活动"), "simplified Chinese should localize dynamic detector reasons")
 }
 
@@ -727,7 +727,7 @@ private func testActiveLogHintSuppressesMultipleUnprojectedProcessDuplicates() t
     expect(tasks.first?.sessionID == "log:sample/window1", "log hint should remain the visible task")
 }
 
-private func testCodexSessionProviderReportsRecentDesktopSession() throws {
+private func testCodexSessionProviderReportsRecentActiveSession() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
@@ -758,14 +758,14 @@ private func testCodexSessionProviderReportsRecentDesktopSession() throws {
     )
     let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
 
-    expect(hints.count == 1, "Codex provider should report recent Desktop sessions")
+    expect(hints.count == 1, "Codex provider should report recent active sessions")
     expect(hints.first?.agentID == "codex", "Codex provider should attach hints to the Codex report")
     expect(hints.first?.sessionID == "codex-session", "Codex provider should preserve session ID")
     expect(hints.first?.projectPath == "/tmp/signal-lanes", "Codex provider should preserve cwd as project path")
     expect(hints.first?.state == .working, "recent Codex sessions should be working")
 }
 
-private func testCodexSessionProviderDoesNotMarkMetadataOnlySessionWorking() throws {
+private func testCodexSessionProviderSkipsMetadataOnlySession() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
@@ -796,11 +796,10 @@ private func testCodexSessionProviderDoesNotMarkMetadataOnlySessionWorking() thr
     )
     let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
 
-    expect(hints.count == 1, "Codex provider should keep recent Desktop sessions visible")
-    expect(hints.first?.state == .idle, "metadata-only Codex sessions should not be treated as active work")
+    expect(hints.isEmpty, "metadata-only Codex sessions should not appear as stopped tasks")
 }
 
-private func testCodexSessionProviderMarksCompletedTurnIdleImmediately() throws {
+private func testCodexSessionProviderSkipsCompletedTurn() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
@@ -832,11 +831,10 @@ private func testCodexSessionProviderMarksCompletedTurnIdleImmediately() throws 
     )
     let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
 
-    expect(hints.count == 1, "Codex provider should keep recent completed sessions visible")
-    expect(hints.first?.state == .idle, "completed Codex turns should become idle immediately")
+    expect(hints.isEmpty, "completed Codex turns should not appear as stopped tasks")
 }
 
-private func testCodexSessionProviderMarksAbortedTurnIdleImmediately() throws {
+private func testCodexSessionProviderSkipsAbortedTurn() throws {
     let fileManager = FileManager.default
     let rootURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("signal-lanes-\(UUID().uuidString)", isDirectory: true)
@@ -868,8 +866,7 @@ private func testCodexSessionProviderMarksAbortedTurnIdleImmediately() throws {
     )
     let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
 
-    expect(hints.count == 1, "Codex provider should keep recent aborted sessions visible")
-    expect(hints.first?.state == .idle, "aborted Codex turns should become idle immediately")
+    expect(hints.isEmpty, "aborted Codex turns should not appear as stopped tasks")
 }
 
 private func testCodexSessionProviderTreatsPendingBrowserOperationAsWorking() throws {
@@ -906,7 +903,7 @@ private func testCodexSessionProviderTreatsPendingBrowserOperationAsWorking() th
 
     expect(hints.count == 1, "Codex provider should keep pending browser operation sessions visible")
     expect(hints.first?.state == .working, "pending browser operation should be working, not waiting")
-    expect(hints.first?.reason == "Codex Desktop session is active.", "pending browser operation should explain the active state")
+    expect(hints.first?.reason == "Codex session is active.", "pending browser operation should explain the active state")
 }
 
 private func testCodexSessionProviderTreatsBuiltInBrowserToolAsWorking() throws {
@@ -943,7 +940,7 @@ private func testCodexSessionProviderTreatsBuiltInBrowserToolAsWorking() throws 
 
     expect(hints.count == 1, "Codex provider should keep built-in browser operation sessions visible")
     expect(hints.first?.state == .working, "built-in browser operation should be working, not waiting")
-    expect(hints.first?.reason == "Codex Desktop session is active.", "built-in browser operation should explain the active state")
+    expect(hints.first?.reason == "Codex session is active.", "built-in browser operation should explain the active state")
 }
 
 private func testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting() throws {
@@ -1124,8 +1121,7 @@ private func testCodexSessionProviderTailCanStartInsideUTF8Character() throws {
     )
     let hints = provider.taskHints(now: baseDate.addingTimeInterval(30))
 
-    expect(hints.count == 1, "Codex provider should parse a tail that starts inside a UTF-8 character")
-    expect(hints.first?.state == .idle, "Codex tail decoding should preserve terminal events after a partial UTF-8 prefix")
+    expect(hints.isEmpty, "Codex tail decoding should preserve terminal events after a partial UTF-8 prefix")
 }
 
 private func testCodexSessionProviderSkipsOldSessions() throws {
@@ -1896,10 +1892,10 @@ do {
     try testTaskHintsSuppressSameProjectProcessDuplicate()
     try testActiveLogHintAttachesSingleUnprojectedProcessDuplicate()
     try testActiveLogHintSuppressesMultipleUnprojectedProcessDuplicates()
-    try testCodexSessionProviderReportsRecentDesktopSession()
-    try testCodexSessionProviderDoesNotMarkMetadataOnlySessionWorking()
-    try testCodexSessionProviderMarksCompletedTurnIdleImmediately()
-    try testCodexSessionProviderMarksAbortedTurnIdleImmediately()
+    try testCodexSessionProviderReportsRecentActiveSession()
+    try testCodexSessionProviderSkipsMetadataOnlySession()
+    try testCodexSessionProviderSkipsCompletedTurn()
+    try testCodexSessionProviderSkipsAbortedTurn()
     try testCodexSessionProviderTreatsPendingBrowserOperationAsWorking()
     try testCodexSessionProviderTreatsBuiltInBrowserToolAsWorking()
     try testCodexSessionProviderDoesNotKeepCompletedBrowserCallWaiting()
